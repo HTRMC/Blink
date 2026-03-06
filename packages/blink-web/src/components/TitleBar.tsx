@@ -15,7 +15,7 @@ function MenuButton({ label }: { label: string }) {
         color: "#9a9a9a",
         fontSize: 12,
         padding: "2px 8px",
-        cursor: "pointer",
+        cursor: "default",
         borderRadius: 4,
         transition: "background 0.1s ease",
       }}
@@ -25,7 +25,7 @@ function MenuButton({ label }: { label: string }) {
   );
 }
 
-function NavButton({ children, title }: { children: React.ReactNode; title: string }) {
+function NavButton({ children, title, pointer }: { children: React.ReactNode; title: string; pointer?: boolean }) {
   const [hovered, setHovered] = useState(false);
 
   return (
@@ -39,7 +39,7 @@ function NavButton({ children, title }: { children: React.ReactNode; title: stri
         color: "#555",
         fontSize: 14,
         padding: "2px 4px",
-        cursor: "pointer",
+        cursor: pointer ? "pointer" : "default",
         borderRadius: 4,
         display: "flex",
         alignItems: "center",
@@ -138,9 +138,9 @@ export default function TitleBar() {
 
       {/* Right: Layout buttons */}
       <div style={{ display: "flex", alignItems: "center", gap: 2, flex: 1, justifyContent: "flex-end" }}>
-        <NavButton title="Toggle panel"><PanelIcon /></NavButton>
-        <NavButton title="Toggle primary side bar"><SidebarIcon /></NavButton>
-        <NavButton title="Change layout"><LayoutIcon /></NavButton>
+        <NavButton title="Toggle panel" pointer><PanelIcon /></NavButton>
+        <NavButton title="Toggle primary side bar" pointer><SidebarIcon /></NavButton>
+        <NavButton title="Change layout" pointer><LayoutIcon /></NavButton>
       </div>
     </div>
   );
