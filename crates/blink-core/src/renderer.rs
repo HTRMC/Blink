@@ -4,6 +4,7 @@ use wgpu::util::DeviceExt;
 use crate::buffer::TextBuffer;
 use crate::editor::Cursor;
 use crate::font_atlas::FontAtlas;
+use crate::syntax::{self, Highlighter};
 
 // ---- Background pipeline types ----
 
@@ -458,6 +459,7 @@ impl Renderer {
         selection: Option<(usize, usize)>,
         total_content_height: f32,
         scrollbar_opacity: f32,
+        highlighter: &mut Highlighter,
     ) -> Vec<GlyphInstance> {
         let mut instances = Vec::new();
         let lines = buffer.lines();
@@ -465,7 +467,6 @@ impl Renderer {
         let text_start_x = self.gutter_width + padding;
 
         let line_num_color = [0.388, 0.388, 0.388, 1.0]; // #636363
-        let text_color = [1.0, 1.0, 1.0, 1.0]; // white
         let cursor_color = [0.80, 0.84, 0.96, 0.9];
         let current_line_color = [1.0, 1.0, 1.0, 0.04];
         let selection_color = [0.34, 0.42, 0.68, 0.45];
@@ -474,6 +475,12 @@ impl Renderer {
         let visible_count =
             (self.surface_config.height as f32 / self.atlas.line_height) as usize + 2;
         let solid = self.atlas.solid_uv();
+
+        // Pre-scan lines before visible range to track block comment state
+        highlighter.reset();
+        for line in lines.iter().take(visible_start) {
+            highlighter.highlight_line(line);
+        }
 
         // Track byte offset at start of each line for selection rendering
         let mut line_byte_offset: usize = 0;
@@ -544,7 +551,7 @@ impl Renderer {
                             uv_origin: [glyph.uv_x, glyph.uv_y],
                             uv_size: [glyph.uv_w, glyph.uv_h],
                             color: if i == cursor.line {
-                                text_color
+                                [1.0, 1.0, 1.0, 1.0]
                             } else {
                                 line_num_color
                             },
@@ -553,10 +560,18 @@ impl Renderer {
                 }
             }
 
-            // Text content
+            // Syntax-highlighted text content
+            let tokens = highlighter.highlight_line(line);
+            let char_colors = syntax::colors_for_line(line, &tokens);
             for (j, ch) in line.chars().enumerate() {
                 if let Some(glyph) = self.atlas.glyphs.get(&ch) {
                     if glyph.width > 0.0 && glyph.height > 0.0 {
+                        let byte_idx = line.char_indices().nth(j).map(|(i, _)| i).unwrap_or(0);
+                        let color = if byte_idx < char_colors.len() {
+                            char_colors[byte_idx]
+                        } else {
+                            syntax::TokenKind::Normal.color()
+                        };
                         instances.push(GlyphInstance {
                             glyph_pos: [
                                 text_start_x + j as f32 * self.atlas.cell_width + glyph.offset_x,
@@ -565,7 +580,7 @@ impl Renderer {
                             glyph_size: [glyph.width, glyph.height],
                             uv_origin: [glyph.uv_x, glyph.uv_y],
                             uv_size: [glyph.uv_w, glyph.uv_h],
-                            color: text_color,
+                            color,
                         });
                     }
                 }
@@ -678,10 +693,11 @@ impl Renderer {
         scroll_y: f32,
         selection: Option<(usize, usize)>,
         scrollbar_opacity: f32,
+        highlighter: &mut Highlighter,
     ) {
         let total_content_height = buffer.line_count() as f32 * self.atlas.line_height;
         let instances =
-            self.build_glyph_instances(buffer, cursor, scroll_y, selection, total_content_height, scrollbar_opacity);
+            self.build_glyph_instances(buffer, cursor, scroll_y, selection, total_content_height, scrollbar_opacity, highlighter);
         let instance_count = (instances.len() as u64).min(MAX_INSTANCES) as u32;
         self.text_instance_count = instance_count;
 

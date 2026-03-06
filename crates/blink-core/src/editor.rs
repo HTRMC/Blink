@@ -1,6 +1,7 @@
 use wasm_bindgen::prelude::*;
 use crate::buffer::TextBuffer;
 use crate::renderer::Renderer;
+use crate::syntax::Highlighter;
 
 /// Cursor position in the editor.
 #[wasm_bindgen]
@@ -42,6 +43,7 @@ pub struct Editor {
     scrollbar_drag_offset: f32,
     scrollbar_opacity: f32,
     scrollbar_target_opacity: f32,
+    highlighter: Highlighter,
 }
 
 #[wasm_bindgen]
@@ -65,6 +67,7 @@ impl Editor {
             scrollbar_drag_offset: 0.0,
             scrollbar_opacity: 0.0,
             scrollbar_target_opacity: 0.0,
+            highlighter: Highlighter::new(""),
         }
     }
 
@@ -83,6 +86,10 @@ impl Editor {
         self.buffer = TextBuffer::new(text);
         self.cursor = Cursor { line: 0, col: 0, offset: 0 };
         self.selection = Selection { anchor: 0 };
+    }
+
+    pub fn set_language(&mut self, ext: &str) {
+        self.highlighter = Highlighter::new(ext);
     }
 
     pub fn get_content(&self) -> String {
@@ -126,7 +133,7 @@ impl Editor {
     pub fn render(&mut self) {
         if let Some(ref mut renderer) = self.renderer {
             let sel_range = self.selection.range(self.cursor.offset);
-            renderer.render(&self.buffer, &self.cursor, self.scroll_y, sel_range, self.scrollbar_opacity);
+            renderer.render(&self.buffer, &self.cursor, self.scroll_y, sel_range, self.scrollbar_opacity, &mut self.highlighter);
         }
     }
 

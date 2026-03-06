@@ -196,7 +196,7 @@ impl SidebarRenderer {
         surface.configure(&device, &surface_config);
 
         // Font atlas
-        let font_size = 13.0 * device_pixel_ratio;
+        let font_size = 12.0 * device_pixel_ratio;
         let atlas = FontAtlas::new(font_data, font_size);
 
         let atlas_texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -685,7 +685,7 @@ impl SidebarRenderer {
         let mut icon_instances = Vec::new();
         let solid = self.atlas.solid_uv();
         let row_h = self.row_height();
-        let text_color = [0.451, 0.451, 0.451, 1.0]; // #737373
+        let text_color = [0.525, 0.525, 0.525, 1.0]; // #868686
         let hover_bg = [1.0, 1.0, 1.0, 0.05];
         let guide_color = [0.137, 0.137, 0.137, 1.0]; // #232323
         let chevron_color = [0.533, 0.533, 0.533, 1.0]; // #888

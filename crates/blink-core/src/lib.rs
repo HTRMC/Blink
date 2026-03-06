@@ -6,6 +6,7 @@ mod font_atlas;
 mod icon_atlas;
 mod renderer;
 mod sidebar;
+mod syntax;
 
 pub use editor::Editor;
 pub use sidebar::SidebarRenderer;

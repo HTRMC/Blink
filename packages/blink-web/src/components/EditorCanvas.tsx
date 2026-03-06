@@ -44,6 +44,7 @@ export default function EditorCanvas({ activeFile }: Props) {
         await editor.init_renderer("editor-canvas", fontData, devicePixelRatio);
         editorRef.current = editor;
 
+        editor.set_language("rs");
         editor.set_content(
           [
             "// Welcome to Blink",
@@ -78,6 +79,8 @@ export default function EditorCanvas({ activeFile }: Props) {
   useEffect(() => {
     const editor = editorRef.current;
     if (editor && activeFile) {
+      const ext = activeFile.name.split(".").pop() ?? "";
+      editor.set_language(ext);
       editor.set_content(activeFile.content);
       editor.render();
     }
