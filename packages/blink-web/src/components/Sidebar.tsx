@@ -10,7 +10,7 @@ function ChevronRight({ size = 10 }: { size?: number }) {
   );
 }
 
-export default function Sidebar() {
+export default function Sidebar({ width }: { width: number }) {
   const { directoryHandle, openDirectory } = useFileSystem();
   const [collapsed, setCollapsed] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -50,7 +50,7 @@ export default function Sidebar() {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        width: 240,
+        width,
         background: "#141414",
         borderRight: "1px solid #232323",
         display: "flex",

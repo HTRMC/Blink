@@ -29,7 +29,7 @@ function flattenTree(
       depth,
       is_dir: entry.kind === "directory",
       expanded,
-      is_last: isLastArr,
+      is_last: parentIsLast,
       entry,
     });
     if (expanded) {
