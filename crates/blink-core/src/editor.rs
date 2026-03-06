@@ -38,9 +38,13 @@ impl Editor {
         }
     }
 
-    /// Initialize the WebGPU renderer on the given canvas.
-    pub async fn init_renderer(&mut self, canvas_id: &str) -> Result<(), JsValue> {
-        let renderer = Renderer::new(canvas_id).await?;
+    /// Initialize the WebGPU renderer on the given canvas with font data.
+    pub async fn init_renderer(
+        &mut self,
+        canvas_id: &str,
+        font_data: &[u8],
+    ) -> Result<(), JsValue> {
+        let renderer = Renderer::new(canvas_id, font_data).await?;
         self.renderer = Some(renderer);
         Ok(())
     }

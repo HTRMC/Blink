@@ -2,6 +2,7 @@ use wasm_bindgen::prelude::*;
 
 mod buffer;
 mod editor;
+mod font_atlas;
 mod renderer;
 
 pub use editor::Editor;

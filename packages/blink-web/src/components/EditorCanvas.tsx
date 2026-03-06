@@ -15,9 +15,10 @@ export default function EditorCanvas({ activeFile }: Props) {
 
     async function initEditor() {
       try {
-        // Check WebGPU support
         if (!navigator.gpu) {
-          setStatus("WebGPU not supported in this browser. Please use Chrome 113+ or Edge 113+.");
+          setStatus(
+            "WebGPU not supported in this browser. Please use Chrome 113+ or Edge 113+."
+          );
           return;
         }
 
@@ -27,13 +28,37 @@ export default function EditorCanvas({ activeFile }: Props) {
 
         if (cancelled) return;
 
+        setStatus("Loading font...");
+        const fontResp = await fetch("/fonts/JetBrainsMono-Regular.ttf");
+        if (!fontResp.ok) {
+          setStatus(
+            "Font not found. Place a monospace .ttf at public/fonts/JetBrainsMono-Regular.ttf"
+          );
+          return;
+        }
+        const fontData = new Uint8Array(await fontResp.arrayBuffer());
+
+        if (cancelled) return;
+
         const editor = new blink.Editor();
-        await editor.init_renderer("editor-canvas");
+        await editor.init_renderer("editor-canvas", fontData);
         editorRef.current = editor;
 
-        // Set sample content
         editor.set_content(
-          `// Welcome to Blink\n// A GPU-accelerated code editor\n\nfn main() {\n    println!("Hello, Blink!");\n}\n`
+          [
+            "// Welcome to Blink",
+            "// A GPU-accelerated code editor",
+            "",
+            "fn main() {",
+            '    println!("Hello, Blink!");',
+            "",
+            '    let message = "GPU-rendered text!";',
+            "    for i in 0..10 {",
+            '        println!("{}: {}", i, message);',
+            "    }",
+            "}",
+            "",
+          ].join("\n")
         );
         editor.render();
         setStatus("Ready");
@@ -50,7 +75,6 @@ export default function EditorCanvas({ activeFile }: Props) {
     };
   }, []);
 
-  // Re-render when active file changes
   useEffect(() => {
     const editor = editorRef.current;
     if (editor && activeFile) {
@@ -59,7 +83,6 @@ export default function EditorCanvas({ activeFile }: Props) {
     }
   }, [activeFile]);
 
-  // Handle resize
   useEffect(() => {
     const canvas = canvasRef.current;
     const editor = editorRef.current;
