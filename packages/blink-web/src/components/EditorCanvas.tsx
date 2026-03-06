@@ -96,7 +96,7 @@ export default function EditorCanvas({ activeFile }: Props) {
 
     const onKeyDown = (e: KeyboardEvent) => {
       // Let browser handle Ctrl+C/V/X/A/Z, F5, F12, etc.
-      if (e.ctrlKey && ["c", "v", "x", "a", "z", "y"].includes(e.key.toLowerCase())) return;
+      if (e.ctrlKey && ["c", "v", "x", "z", "y"].includes(e.key.toLowerCase())) return;
       if (e.key.startsWith("F") && e.key.length > 1) return;
 
       e.preventDefault();
@@ -106,20 +106,40 @@ export default function EditorCanvas({ activeFile }: Props) {
       }
     };
 
-    const onClick = (e: MouseEvent) => {
+    let dragging = false;
+
+    const onMouseDown = (e: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
       const x = (e.clientX - rect.left) * devicePixelRatio;
       const y = (e.clientY - rect.top) * devicePixelRatio;
-      editor.click(x, y);
+      editor.click(x, y, e.shiftKey);
       editor.render();
       canvas.focus();
+      dragging = true;
+    };
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!dragging) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left) * devicePixelRatio;
+      const y = (e.clientY - rect.top) * devicePixelRatio;
+      editor.drag(x, y);
+      editor.render();
+    };
+
+    const onMouseUp = () => {
+      dragging = false;
     };
 
     canvas.addEventListener("keydown", onKeyDown);
-    canvas.addEventListener("mousedown", onClick);
+    canvas.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
     return () => {
       canvas.removeEventListener("keydown", onKeyDown);
-      canvas.removeEventListener("mousedown", onClick);
+      canvas.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
     };
   }, [status]);
 

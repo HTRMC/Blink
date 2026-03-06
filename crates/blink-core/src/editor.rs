@@ -11,11 +11,28 @@ pub struct Cursor {
     pub offset: usize,
 }
 
+/// Selection range (byte offsets). When anchor == cursor offset, nothing is selected.
+#[derive(Debug, Clone, Copy)]
+pub struct Selection {
+    pub anchor: usize,
+}
+
+impl Selection {
+    fn range(&self, cursor_offset: usize) -> Option<(usize, usize)> {
+        if self.anchor == cursor_offset {
+            None
+        } else {
+            Some((self.anchor.min(cursor_offset), self.anchor.max(cursor_offset)))
+        }
+    }
+}
+
 /// The main editor state, exposed to JavaScript.
 #[wasm_bindgen]
 pub struct Editor {
     buffer: TextBuffer,
     cursor: Cursor,
+    selection: Selection,
     renderer: Option<Renderer>,
     scroll_y: f32,
     viewport_height: f32,
@@ -32,13 +49,13 @@ impl Editor {
                 col: 0,
                 offset: 0,
             },
+            selection: Selection { anchor: 0 },
             renderer: None,
             scroll_y: 0.0,
             viewport_height: 0.0,
         }
     }
 
-    /// Initialize the WebGPU renderer on the given canvas with font data.
     pub async fn init_renderer(
         &mut self,
         canvas_id: &str,
@@ -49,62 +66,57 @@ impl Editor {
         Ok(())
     }
 
-    /// Set the text content of the buffer.
     pub fn set_content(&mut self, text: &str) {
         self.buffer = TextBuffer::new(text);
-        self.cursor = Cursor {
-            line: 0,
-            col: 0,
-            offset: 0,
-        };
+        self.cursor = Cursor { line: 0, col: 0, offset: 0 };
+        self.selection = Selection { anchor: 0 };
     }
 
-    /// Get the current text content.
     pub fn get_content(&self) -> String {
         self.buffer.content()
     }
 
-    /// Insert text at the current cursor position.
     pub fn insert_text(&mut self, text: &str) {
+        self.delete_selection_if_any();
         self.buffer.insert(self.cursor.offset, text);
         self.cursor.offset += text.len();
+        self.selection.anchor = self.cursor.offset;
         self.recalculate_cursor_position();
     }
 
-    /// Delete `count` characters before the cursor (backspace).
     pub fn delete_backward(&mut self, count: usize) {
+        if self.delete_selection_if_any() {
+            return;
+        }
         let actual = count.min(self.cursor.offset);
         if actual == 0 {
             return;
         }
         self.buffer.delete(self.cursor.offset - actual, actual);
         self.cursor.offset -= actual;
+        self.selection.anchor = self.cursor.offset;
         self.recalculate_cursor_position();
     }
 
-    /// Get the number of lines in the buffer.
     pub fn line_count(&self) -> usize {
         self.buffer.line_count()
     }
 
-    /// Get the cursor line.
     pub fn cursor_line(&self) -> usize {
         self.cursor.line
     }
 
-    /// Get the cursor column.
     pub fn cursor_col(&self) -> usize {
         self.cursor.col
     }
 
-    /// Render the current editor state.
     pub fn render(&mut self) {
         if let Some(ref mut renderer) = self.renderer {
-            renderer.render(&self.buffer, &self.cursor, self.scroll_y);
+            let sel_range = self.selection.range(self.cursor.offset);
+            renderer.render(&self.buffer, &self.cursor, self.scroll_y, sel_range);
         }
     }
 
-    /// Resize the rendering surface.
     pub fn resize(&mut self, width: u32, height: u32) {
         self.viewport_height = height as f32;
         if let Some(ref mut renderer) = self.renderer {
@@ -112,64 +124,55 @@ impl Editor {
         }
     }
 
-    /// Set cursor position from a mouse click at pixel coordinates.
-    pub fn click(&mut self, pixel_x: f32, pixel_y: f32) {
-        let (cell_width, line_height, gutter_width) = match &self.renderer {
-            Some(r) => (r.cell_width(), r.line_height(), r.gutter_width()),
-            None => return,
-        };
-
-        let padding = 8.0;
-        let text_start_x = gutter_width + padding;
-
-        let line = ((pixel_y + self.scroll_y) / line_height).floor() as usize;
-        let max_line = self.buffer.line_count().saturating_sub(1);
-        let line = line.min(max_line);
-
-        let col = if pixel_x > text_start_x {
-            ((pixel_x - text_start_x) / cell_width).round() as usize
-        } else {
-            0
-        };
-        let col = col.min(self.buffer.line_len(line));
-
-        self.cursor.offset = self.buffer.line_start_offset(line) + col;
+    /// Set cursor from mouse click. If shift is held, extend selection.
+    pub fn click(&mut self, pixel_x: f32, pixel_y: f32, shift: bool) {
+        let offset = self.pixel_to_offset(pixel_x, pixel_y);
+        if !shift {
+            self.selection.anchor = offset;
+        }
+        self.cursor.offset = offset;
         self.recalculate_cursor_position();
     }
 
-    /// Handle a key event from JavaScript. Returns true if the editor state changed.
+    /// Update selection during mouse drag.
+    pub fn drag(&mut self, pixel_x: f32, pixel_y: f32) {
+        let offset = self.pixel_to_offset(pixel_x, pixel_y);
+        self.cursor.offset = offset;
+        self.recalculate_cursor_position();
+    }
+
     pub fn handle_key(&mut self, key: &str, ctrl: bool, shift: bool) -> bool {
         match key {
             "ArrowLeft" => {
                 if ctrl {
-                    self.move_word_left();
+                    self.move_word_left_sel(shift);
                 } else {
-                    self.move_left();
+                    self.move_left_sel(shift);
                 }
                 true
             }
             "ArrowRight" => {
                 if ctrl {
-                    self.move_word_right();
+                    self.move_word_right_sel(shift);
                 } else {
-                    self.move_right();
+                    self.move_right_sel(shift);
                 }
                 true
             }
             "ArrowUp" => {
-                self.move_up();
+                self.move_up_sel(shift);
                 true
             }
             "ArrowDown" => {
-                self.move_down();
+                self.move_down_sel(shift);
                 true
             }
             "Home" => {
-                self.move_to_line_start();
+                self.move_to_line_start_sel(shift);
                 true
             }
             "End" => {
-                self.move_to_line_end();
+                self.move_to_line_end_sel(shift);
                 true
             }
             "Backspace" => {
@@ -189,6 +192,10 @@ impl Editor {
                 true
             }
             _ => {
+                if ctrl && key.to_lowercase() == "a" {
+                    self.select_all();
+                    return true;
+                }
                 if !ctrl && key.len() == 1 {
                     self.insert_text(key);
                     true
@@ -199,32 +206,109 @@ impl Editor {
         }
     }
 
-    /// Delete `count` characters after the cursor.
     pub fn delete_forward(&mut self, count: usize) {
+        if self.delete_selection_if_any() {
+            return;
+        }
         let len = self.buffer.len();
         let actual = count.min(len - self.cursor.offset);
         if actual == 0 {
             return;
         }
         self.buffer.delete(self.cursor.offset, actual);
+        self.selection.anchor = self.cursor.offset;
         self.recalculate_cursor_position();
     }
 
-    fn move_left(&mut self) {
+    /// Get selected text, or empty string if no selection.
+    pub fn get_selection_text(&self) -> String {
+        match self.selection.range(self.cursor.offset) {
+            Some((start, end)) => {
+                let content = self.buffer.content();
+                content[start..end].to_string()
+            }
+            None => String::new(),
+        }
+    }
+
+    pub fn has_selection(&self) -> bool {
+        self.selection.anchor != self.cursor.offset
+    }
+
+    fn select_all(&mut self) {
+        self.selection.anchor = 0;
+        self.cursor.offset = self.buffer.len();
+        self.recalculate_cursor_position();
+    }
+
+    /// Delete the current selection and collapse cursor. Returns true if there was a selection.
+    fn delete_selection_if_any(&mut self) -> bool {
+        if let Some((start, end)) = self.selection.range(self.cursor.offset) {
+            self.buffer.delete(start, end - start);
+            self.cursor.offset = start;
+            self.selection.anchor = start;
+            self.recalculate_cursor_position();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn pixel_to_offset(&self, pixel_x: f32, pixel_y: f32) -> usize {
+        let (cell_width, line_height, gutter_width) = match &self.renderer {
+            Some(r) => (r.cell_width(), r.line_height(), r.gutter_width()),
+            None => return 0,
+        };
+
+        let padding = 8.0;
+        let text_start_x = gutter_width + padding;
+
+        let line = ((pixel_y + self.scroll_y) / line_height).floor().max(0.0) as usize;
+        let max_line = self.buffer.line_count().saturating_sub(1);
+        let line = line.min(max_line);
+
+        let col = if pixel_x > text_start_x {
+            ((pixel_x - text_start_x) / cell_width).round() as usize
+        } else {
+            0
+        };
+        let col = col.min(self.buffer.line_len(line));
+
+        self.buffer.line_start_offset(line) + col
+    }
+
+    // Movement helpers that optionally extend selection
+
+    fn move_left_sel(&mut self, shift: bool) {
+        if !shift && self.has_selection() {
+            // Collapse to the start of selection
+            let start = self.selection.anchor.min(self.cursor.offset);
+            self.cursor.offset = start;
+            self.selection.anchor = start;
+            self.recalculate_cursor_position();
+            return;
+        }
         if self.cursor.offset > 0 {
             self.cursor.offset -= 1;
-            // Skip back over multi-byte UTF-8
             let content = self.buffer.content();
-            while self.cursor.offset > 0
-                && !content.is_char_boundary(self.cursor.offset)
-            {
+            while self.cursor.offset > 0 && !content.is_char_boundary(self.cursor.offset) {
                 self.cursor.offset -= 1;
+            }
+            if !shift {
+                self.selection.anchor = self.cursor.offset;
             }
             self.recalculate_cursor_position();
         }
     }
 
-    fn move_right(&mut self) {
+    fn move_right_sel(&mut self, shift: bool) {
+        if !shift && self.has_selection() {
+            let end = self.selection.anchor.max(self.cursor.offset);
+            self.cursor.offset = end;
+            self.selection.anchor = end;
+            self.recalculate_cursor_position();
+            return;
+        }
         let len = self.buffer.len();
         if self.cursor.offset < len {
             let content = self.buffer.content();
@@ -234,73 +318,90 @@ impl Editor {
                 .map(|c| c.len_utf8())
                 .unwrap_or(1);
             self.cursor.offset += ch_len;
+            if !shift {
+                self.selection.anchor = self.cursor.offset;
+            }
             self.recalculate_cursor_position();
         }
     }
 
-    fn move_up(&mut self) {
+    fn move_up_sel(&mut self, shift: bool) {
         if self.cursor.line > 0 {
             let target_line = self.cursor.line - 1;
             let target_col = self.cursor.col.min(self.buffer.line_len(target_line));
             self.cursor.offset = self.buffer.line_start_offset(target_line) + target_col;
+            if !shift {
+                self.selection.anchor = self.cursor.offset;
+            }
             self.recalculate_cursor_position();
         }
     }
 
-    fn move_down(&mut self) {
+    fn move_down_sel(&mut self, shift: bool) {
         let max_line = self.buffer.line_count().saturating_sub(1);
         if self.cursor.line < max_line {
             let target_line = self.cursor.line + 1;
             let target_col = self.cursor.col.min(self.buffer.line_len(target_line));
             self.cursor.offset = self.buffer.line_start_offset(target_line) + target_col;
+            if !shift {
+                self.selection.anchor = self.cursor.offset;
+            }
             self.recalculate_cursor_position();
         }
     }
 
-    fn move_to_line_start(&mut self) {
+    fn move_to_line_start_sel(&mut self, shift: bool) {
         self.cursor.offset = self.buffer.line_start_offset(self.cursor.line);
+        if !shift {
+            self.selection.anchor = self.cursor.offset;
+        }
         self.recalculate_cursor_position();
     }
 
-    fn move_to_line_end(&mut self) {
+    fn move_to_line_end_sel(&mut self, shift: bool) {
         self.cursor.offset =
             self.buffer.line_start_offset(self.cursor.line) + self.buffer.line_len(self.cursor.line);
+        if !shift {
+            self.selection.anchor = self.cursor.offset;
+        }
         self.recalculate_cursor_position();
     }
 
-    fn move_word_left(&mut self) {
+    fn move_word_left_sel(&mut self, shift: bool) {
         if self.cursor.offset == 0 {
             return;
         }
         let content = self.buffer.content();
         let bytes = content.as_bytes();
         let mut pos = self.cursor.offset;
-        // Skip whitespace
         while pos > 0 && bytes[pos - 1].is_ascii_whitespace() {
             pos -= 1;
         }
-        // Skip word characters
         while pos > 0 && !bytes[pos - 1].is_ascii_whitespace() {
             pos -= 1;
         }
         self.cursor.offset = pos;
+        if !shift {
+            self.selection.anchor = self.cursor.offset;
+        }
         self.recalculate_cursor_position();
     }
 
-    fn move_word_right(&mut self) {
+    fn move_word_right_sel(&mut self, shift: bool) {
         let content = self.buffer.content();
         let len = content.len();
         let bytes = content.as_bytes();
         let mut pos = self.cursor.offset;
-        // Skip word characters
         while pos < len && !bytes[pos].is_ascii_whitespace() {
             pos += 1;
         }
-        // Skip whitespace
         while pos < len && bytes[pos].is_ascii_whitespace() {
             pos += 1;
         }
         self.cursor.offset = pos;
+        if !shift {
+            self.selection.anchor = self.cursor.offset;
+        }
         self.recalculate_cursor_position();
     }
 

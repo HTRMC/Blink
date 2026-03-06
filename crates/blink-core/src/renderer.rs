@@ -455,21 +455,26 @@ impl Renderer {
         buffer: &TextBuffer,
         cursor: &Cursor,
         scroll_y: f32,
+        selection: Option<(usize, usize)>,
     ) -> Vec<GlyphInstance> {
         let mut instances = Vec::new();
         let lines = buffer.lines();
         let padding = 8.0;
         let text_start_x = self.gutter_width + padding;
 
-        let line_num_color = [0.42, 0.44, 0.53, 1.0]; // dim
-        let text_color = [0.80, 0.84, 0.96, 1.0]; // #cdd6f4
+        let line_num_color = [0.42, 0.44, 0.53, 1.0];
+        let text_color = [0.80, 0.84, 0.96, 1.0];
         let cursor_color = [0.80, 0.84, 0.96, 0.9];
         let current_line_color = [1.0, 1.0, 1.0, 0.04];
+        let selection_color = [0.34, 0.42, 0.68, 0.45];
 
         let visible_start = (scroll_y / self.atlas.line_height) as usize;
         let visible_count =
             (self.surface_config.height as f32 / self.atlas.line_height) as usize + 2;
         let solid = self.atlas.solid_uv();
+
+        // Track byte offset at start of each line for selection rendering
+        let mut line_byte_offset: usize = 0;
 
         for (i, line) in lines
             .iter()
@@ -477,11 +482,14 @@ impl Renderer {
             .skip(visible_start)
             .take(visible_count)
         {
+            // Compute the byte offset for this line
+            line_byte_offset = buffer.line_start_offset(i);
+            let line_end_offset = line_byte_offset + line.len();
             let row_y = i as f32 * self.atlas.line_height - scroll_y;
             let baseline_y = row_y + self.atlas.ascent;
 
-            // Current line highlight
-            if i == cursor.line {
+            // Current line highlight (only when no selection)
+            if i == cursor.line && selection.is_none() {
                 instances.push(GlyphInstance {
                     glyph_pos: [self.gutter_width, row_y],
                     glyph_size: [self.surface_config.width as f32 - self.gutter_width, self.atlas.line_height],
@@ -489,6 +497,35 @@ impl Renderer {
                     uv_size: [solid[2], solid[3]],
                     color: current_line_color,
                 });
+            }
+
+            // Selection highlight for this line
+            if let Some((sel_start, sel_end)) = selection {
+                if sel_start < line_end_offset + 1 && sel_end > line_byte_offset {
+                    let col_start = if sel_start > line_byte_offset {
+                        sel_start - line_byte_offset
+                    } else {
+                        0
+                    };
+                    let col_end = if sel_end < line_end_offset {
+                        sel_end - line_byte_offset
+                    } else {
+                        // Extend selection to include the newline character visually
+                        line.len() + if sel_end > line_end_offset { 1 } else { 0 }
+                    };
+
+                    if col_end > col_start {
+                        let sel_x = text_start_x + col_start as f32 * self.atlas.cell_width;
+                        let sel_w = (col_end - col_start) as f32 * self.atlas.cell_width;
+                        instances.push(GlyphInstance {
+                            glyph_pos: [sel_x, row_y],
+                            glyph_size: [sel_w, self.atlas.line_height],
+                            uv_origin: [solid[0], solid[1]],
+                            uv_size: [solid[2], solid[3]],
+                            color: selection_color,
+                        });
+                    }
+                }
             }
 
             // Line number
@@ -587,9 +624,14 @@ impl Renderer {
         );
     }
 
-    pub fn render(&mut self, buffer: &TextBuffer, cursor: &Cursor, scroll_y: f32) {
-        // Build glyph instances
-        let instances = self.build_glyph_instances(buffer, cursor, scroll_y);
+    pub fn render(
+        &mut self,
+        buffer: &TextBuffer,
+        cursor: &Cursor,
+        scroll_y: f32,
+        selection: Option<(usize, usize)>,
+    ) {
+        let instances = self.build_glyph_instances(buffer, cursor, scroll_y, selection);
         let instance_count = (instances.len() as u64).min(MAX_INSTANCES) as u32;
         self.text_instance_count = instance_count;
 
