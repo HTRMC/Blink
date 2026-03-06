@@ -238,8 +238,8 @@ impl SidebarRenderer {
         let atlas_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
 
@@ -754,8 +754,8 @@ impl SidebarRenderer {
                     if glyph.width > 0.0 && glyph.height > 0.0 {
                         text_instances.push(GlyphInstance {
                             glyph_pos: [
-                                cursor_x + glyph.offset_x,
-                                baseline_y - glyph.offset_y - glyph.height,
+                                (cursor_x + glyph.offset_x).round(),
+                                (baseline_y - glyph.offset_y - glyph.height).round(),
                             ],
                             glyph_size: [glyph.width, glyph.height],
                             uv_origin: [glyph.uv_x, glyph.uv_y],

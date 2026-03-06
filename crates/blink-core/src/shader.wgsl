@@ -68,5 +68,6 @@ fn vs_text(in: TextVertexInput) -> TextVertexOutput {
 @fragment
 fn fs_text(in: TextVertexOutput) -> @location(0) vec4<f32> {
     let alpha = textureSample(atlas_texture, atlas_sampler, in.uv).r;
-    return vec4<f32>(in.color.rgb, in.color.a * alpha);
+    let boosted = pow(alpha, 0.6);
+    return vec4<f32>(in.color.rgb, in.color.a * boosted);
 }
