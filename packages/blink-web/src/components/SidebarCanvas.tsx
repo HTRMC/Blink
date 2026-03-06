@@ -191,8 +191,6 @@ export default function SidebarCanvas({ showGuides }: Props) {
       renderTree();
     };
 
-    let clickTimer: ReturnType<typeof setTimeout> | null = null;
-
     const onClick = (e: MouseEvent) => {
       const renderer = rendererRef.current;
       if (!renderer) return;
@@ -219,22 +217,11 @@ export default function SidebarCanvas({ showGuides }: Props) {
         }
         renderTree();
       } else {
-        // Delay single-click to distinguish from double-click
-        if (clickTimer) clearTimeout(clickTimer);
-        clickTimer = setTimeout(() => {
-          clickTimer = null;
-          openFile(flat.entry);
-        }, 200);
+        openFile(flat.entry);
       }
     };
 
     const onDblClick = (e: MouseEvent) => {
-      // Cancel the pending single-click preview open
-      if (clickTimer) {
-        clearTimeout(clickTimer);
-        clickTimer = null;
-      }
-
       const renderer = rendererRef.current;
       if (!renderer) return;
       const rect = canvas.getBoundingClientRect();
@@ -244,7 +231,7 @@ export default function SidebarCanvas({ showGuides }: Props) {
 
       const flat = flatRef.current[index];
       if (!flat.is_dir) {
-        openFile(flat.entry).then(() => pinFile(flat.entry.path));
+        pinFile(flat.entry.path);
       }
     };
 
@@ -257,7 +244,6 @@ export default function SidebarCanvas({ showGuides }: Props) {
       canvas.removeEventListener("mouseleave", onMouseLeave);
       canvas.removeEventListener("click", onClick);
       canvas.removeEventListener("dblclick", onDblClick);
-      if (clickTimer) clearTimeout(clickTimer);
     };
   }, [ready, openFile, pinFile, loadChildren]);
 

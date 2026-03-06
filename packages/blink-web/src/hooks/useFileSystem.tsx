@@ -122,9 +122,9 @@ export function FileSystemProvider({ children }: { children: ReactNode }) {
 
   const openFile = useCallback(
     async (entry: FileEntry) => {
-      // If already open and pinned, just activate it
+      // If already open (pinned or preview), just activate it
       const existing = openFiles.find((f) => f.path === entry.path);
-      if (existing && !existing.preview) {
+      if (existing) {
         setActiveFileState(existing);
         return;
       }
