@@ -469,7 +469,7 @@ impl Renderer {
         let line_num_color = [0.388, 0.388, 0.388, 1.0]; // #636363
         let cursor_color = [0.80, 0.84, 0.96, 0.9];
         let current_line_color = [1.0, 1.0, 1.0, 0.04];
-        let selection_color = [0.34, 0.42, 0.68, 0.45];
+        let selection_color = [1.0, 1.0, 1.0, 0.08];
 
         let visible_start = (scroll_y / self.atlas.line_height) as usize;
         let visible_count =
