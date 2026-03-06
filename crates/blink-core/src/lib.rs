@@ -3,6 +3,7 @@ use wasm_bindgen::prelude::*;
 mod buffer;
 mod editor;
 mod font_atlas;
+mod icon_atlas;
 mod renderer;
 mod sidebar;
 

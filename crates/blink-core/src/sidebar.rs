@@ -3,6 +3,7 @@ use wasm_bindgen::prelude::*;
 use wgpu::util::DeviceExt;
 
 use crate::font_atlas::FontAtlas;
+use crate::icon_atlas::{Icon, IconAtlas};
 
 // ---- GPU types (same layout as renderer.rs) ----
 
@@ -110,6 +111,10 @@ pub struct SidebarRenderer {
     text_instance_count: u32,
 
     atlas: FontAtlas,
+    icon_atlas: IconAtlas,
+    icon_bind_group: wgpu::BindGroup,
+    icon_instance_buffer: wgpu::Buffer,
+    icon_instance_count: u32,
 
     scroll_y: f32,
     viewport_width: f32,
@@ -231,6 +236,53 @@ impl SidebarRenderer {
 
         let atlas_view = atlas_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let atlas_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+
+        // Icon atlas
+        let icon_atlas = IconAtlas::new(device_pixel_ratio);
+
+        let icon_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Sidebar Icon Atlas"),
+            size: wgpu::Extent3d {
+                width: icon_atlas.texture_width,
+                height: icon_atlas.texture_height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &icon_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &icon_atlas.texture_data,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(icon_atlas.texture_width),
+                rows_per_image: Some(icon_atlas.texture_height),
+            },
+            wgpu::Extent3d {
+                width: icon_atlas.texture_width,
+                height: icon_atlas.texture_height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        let icon_view = icon_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let icon_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Linear,
@@ -415,6 +467,33 @@ impl SidebarRenderer {
             mapped_at_creation: false,
         });
 
+        // Icon bind group (same layout, different texture)
+        let icon_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Icon Bind Group"),
+            layout: &text_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: text_uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&icon_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&icon_sampler),
+                },
+            ],
+        });
+
+        let icon_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Icon Instance Buffer"),
+            size: 1024 * std::mem::size_of::<GlyphInstance>() as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         Ok(SidebarRenderer {
             device,
             queue,
@@ -430,6 +509,10 @@ impl SidebarRenderer {
             text_instance_buffer,
             text_instance_count: 0,
             atlas,
+            icon_atlas,
+            icon_bind_group,
+            icon_instance_buffer,
+            icon_instance_count: 0,
             scroll_y: 0.0,
             viewport_width: width as f32,
             viewport_height: height as f32,
@@ -499,15 +582,28 @@ impl SidebarRenderer {
         };
         log::info!("SidebarRenderer: rendering {} entries, viewport {}x{}", entries.len(), self.viewport_width, self.viewport_height);
 
-        let instances = self.build_instances(&entries);
-        let instance_count = (instances.len() as u64).min(MAX_INSTANCES) as u32;
+        let (text_instances, icon_instances) = self.build_instances(&entries);
+        let instance_count = (text_instances.len() as u64).min(MAX_INSTANCES) as u32;
         self.text_instance_count = instance_count;
 
         if instance_count > 0 {
             self.queue.write_buffer(
                 &self.text_instance_buffer,
                 0,
-                bytemuck::cast_slice(&instances[..instance_count as usize]),
+                bytemuck::cast_slice(&text_instances[..instance_count as usize]),
+            );
+        }
+
+        let icon_count = (icon_instances.len() as u64).min(1024) as u32;
+        self.icon_instance_count = icon_count;
+        log::info!("SidebarRenderer: text={}, icons={}", instance_count, icon_count);
+        web_sys::console::log_1(&format!("DIRECT: text={}, icons={}", instance_count, icon_count).into());
+
+        if icon_count > 0 {
+            self.queue.write_buffer(
+                &self.icon_instance_buffer,
+                0,
+                bytemuck::cast_slice(&icon_instances[..icon_count as usize]),
             );
         }
 
@@ -559,6 +655,13 @@ impl SidebarRenderer {
                 pass.set_index_buffer(self.text_quad_ib.slice(..), wgpu::IndexFormat::Uint16);
                 pass.draw_indexed(0..6, 0, 0..self.text_instance_count);
             }
+
+            // Icons
+            if self.icon_instance_count > 0 {
+                pass.set_bind_group(0, &self.icon_bind_group, &[]);
+                pass.set_vertex_buffer(1, self.icon_instance_buffer.slice(..));
+                pass.draw_indexed(0..6, 0, 0..self.icon_instance_count);
+            }
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -577,8 +680,9 @@ impl SidebarRenderer {
         ]
     }
 
-    fn build_instances(&self, entries: &[SidebarEntry]) -> Vec<GlyphInstance> {
-        let mut instances = Vec::new();
+    fn build_instances(&self, entries: &[SidebarEntry]) -> (Vec<GlyphInstance>, Vec<GlyphInstance>) {
+        let mut text_instances = Vec::new();
+        let mut icon_instances = Vec::new();
         let solid = self.atlas.solid_uv();
         let row_h = self.row_height();
         let text_color = [0.451, 0.451, 0.451, 1.0]; // #737373
@@ -600,7 +704,7 @@ impl SidebarRenderer {
 
             // Hover highlight
             if i as i32 == self.hover_index {
-                instances.push(GlyphInstance {
+                text_instances.push(GlyphInstance {
                     glyph_pos: [0.0, row_y],
                     glyph_size: [self.viewport_width, row_h],
                     uv_origin: [solid[0], solid[1]],
@@ -614,7 +718,7 @@ impl SidebarRenderer {
                 for (d, &active) in entry.is_last.iter().enumerate() {
                     if !active {
                         let guide_x = BASE_INDENT + d as f32 * INDENT_WIDTH + CHEVRON_CENTER;
-                        instances.push(GlyphInstance {
+                        text_instances.push(GlyphInstance {
                             glyph_pos: [guide_x, row_y],
                             glyph_size: [1.0, row_h],
                             uv_origin: [solid[0], solid[1]],
@@ -627,23 +731,19 @@ impl SidebarRenderer {
 
             let baseline_y = row_y + PADDING_Y + self.atlas.ascent;
 
-            // Chevron for directories
+            // Chevron icon for directories
             if entry.is_dir {
-                let chevron_ch = if entry.expanded { 'v' } else { '>' };
-                if let Some(glyph) = self.atlas.glyphs.get(&chevron_ch) {
-                    if glyph.width > 0.0 && glyph.height > 0.0 {
-                        let chevron_x = indent + (CHEVRON_SPACE - glyph.width) / 2.0;
-                        instances.push(GlyphInstance {
-                            glyph_pos: [
-                                chevron_x + glyph.offset_x,
-                                baseline_y - glyph.offset_y - glyph.height,
-                            ],
-                            glyph_size: [glyph.width, glyph.height],
-                            uv_origin: [glyph.uv_x, glyph.uv_y],
-                            uv_size: [glyph.uv_w, glyph.uv_h],
-                            color: chevron_color,
-                        });
-                    }
+                let icon = if entry.expanded { Icon::ChevronDown } else { Icon::ChevronRight };
+                if let Some(info) = self.icon_atlas.get(icon) {
+                    let icon_x = indent + (CHEVRON_SPACE - info.width) / 2.0;
+                    let icon_y = row_y + (row_h - info.height) / 2.0;
+                    icon_instances.push(GlyphInstance {
+                        glyph_pos: [icon_x, icon_y],
+                        glyph_size: [info.width, info.height],
+                        uv_origin: [info.uv_x, info.uv_y],
+                        uv_size: [info.uv_w, info.uv_h],
+                        color: chevron_color,
+                    });
                 }
             }
 
@@ -652,7 +752,7 @@ impl SidebarRenderer {
             for ch in entry.name.chars() {
                 if let Some(glyph) = self.atlas.glyphs.get(&ch) {
                     if glyph.width > 0.0 && glyph.height > 0.0 {
-                        instances.push(GlyphInstance {
+                        text_instances.push(GlyphInstance {
                             glyph_pos: [
                                 cursor_x + glyph.offset_x,
                                 baseline_y - glyph.offset_y - glyph.height,
@@ -668,6 +768,6 @@ impl SidebarRenderer {
             }
         }
 
-        instances
+        (text_instances, icon_instances)
     }
 }
