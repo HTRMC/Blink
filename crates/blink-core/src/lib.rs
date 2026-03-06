@@ -4,8 +4,10 @@ mod buffer;
 mod editor;
 mod font_atlas;
 mod renderer;
+mod sidebar;
 
 pub use editor::Editor;
+pub use sidebar::SidebarRenderer;
 
 #[wasm_bindgen(start)]
 pub fn init() {

@@ -3,8 +3,8 @@ import type { OpenFile } from "../hooks/useFileSystem";
 interface Props {
   tabs: OpenFile[];
   activeFile: OpenFile | null;
-  onSelect: (name: string) => void;
-  onClose: (name: string) => void;
+  onSelect: (path: string) => void;
+  onClose: (path: string) => void;
 }
 
 export default function TabBar({ tabs, activeFile, onSelect, onClose }: Props) {
@@ -22,8 +22,8 @@ export default function TabBar({ tabs, activeFile, onSelect, onClose }: Props) {
     >
       {tabs.map((tab) => (
         <div
-          key={tab.name}
-          onClick={() => onSelect(tab.name)}
+          key={tab.path}
+          onClick={() => onSelect(tab.path)}
           style={{
             padding: "0 16px",
             display: "flex",
@@ -32,17 +32,17 @@ export default function TabBar({ tabs, activeFile, onSelect, onClose }: Props) {
             fontSize: 13,
             cursor: "pointer",
             background:
-              activeFile?.name === tab.name ? "#181818" : "transparent",
+              activeFile?.path === tab.path ? "#181818" : "transparent",
             borderRight: "1px solid #313244",
             color:
-              activeFile?.name === tab.name ? "#cdd6f4" : "#6c7086",
+              activeFile?.path === tab.path ? "#cdd6f4" : "#6c7086",
           }}
         >
           <span>{tab.name}</span>
           <span
             onClick={(e) => {
               e.stopPropagation();
-              onClose(tab.name);
+              onClose(tab.path);
             }}
             style={{
               fontSize: 16,

@@ -41,7 +41,7 @@ export default function EditorCanvas({ activeFile }: Props) {
         if (cancelled) return;
 
         const editor = new blink.Editor();
-        await editor.init_renderer("editor-canvas", fontData);
+        await editor.init_renderer("editor-canvas", fontData, devicePixelRatio);
         editorRef.current = editor;
 
         editor.set_content(
@@ -157,17 +157,33 @@ export default function EditorCanvas({ activeFile }: Props) {
       scheduleFrame();
     };
 
+    const wrapper = canvas.parentElement!;
+
+    const onMouseEnter = () => {
+      editor.set_canvas_hovered(true);
+      scheduleFrame();
+    };
+
+    const onMouseLeave = () => {
+      editor.set_canvas_hovered(false);
+      scheduleFrame();
+    };
+
     canvas.addEventListener("keydown", onKeyDown);
     canvas.addEventListener("mousedown", onMouseDown);
     canvas.addEventListener("wheel", onWheel, { passive: false });
     window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseup", onMouseUp);
+    wrapper.addEventListener("mouseenter", onMouseEnter);
+    wrapper.addEventListener("mouseleave", onMouseLeave);
     return () => {
       canvas.removeEventListener("keydown", onKeyDown);
       canvas.removeEventListener("mousedown", onMouseDown);
       canvas.removeEventListener("wheel", onWheel);
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
+      wrapper.removeEventListener("mouseenter", onMouseEnter);
+      wrapper.removeEventListener("mouseleave", onMouseLeave);
       if (animFrameId) cancelAnimationFrame(animFrameId);
     };
   }, [status]);

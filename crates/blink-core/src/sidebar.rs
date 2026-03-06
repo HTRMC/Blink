@@ -1,11 +1,10 @@
+use serde::Deserialize;
 use wasm_bindgen::prelude::*;
 use wgpu::util::DeviceExt;
 
-use crate::buffer::TextBuffer;
-use crate::editor::Cursor;
 use crate::font_atlas::FontAtlas;
 
-// ---- Background pipeline types ----
+// ---- GPU types (same layout as renderer.rs) ----
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -27,8 +26,6 @@ impl Vertex {
     }
 }
 
-// ---- Text pipeline types ----
-
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct QuadVertex {
@@ -45,24 +42,6 @@ struct GlyphInstance {
     color: [f32; 4],
 }
 
-#[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct TextUniforms {
-    viewport_size: [f32; 2],
-    _pad: [f32; 2],
-}
-
-const MAX_INSTANCES: u64 = 16384;
-
-const QUAD_VERTICES: [QuadVertex; 4] = [
-    QuadVertex { position: [0.0, 0.0] },
-    QuadVertex { position: [1.0, 0.0] },
-    QuadVertex { position: [0.0, 1.0] },
-    QuadVertex { position: [1.0, 1.0] },
-];
-
-const QUAD_INDICES: [u16; 6] = [0, 1, 2, 2, 1, 3];
-
 impl GlyphInstance {
     const ATTRIBS: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![
         1 => Float32x2,
@@ -73,17 +52,55 @@ impl GlyphInstance {
     ];
 }
 
-pub struct Renderer {
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct TextUniforms {
+    viewport_size: [f32; 2],
+    _pad: [f32; 2],
+}
+
+const MAX_INSTANCES: u64 = 8192;
+
+const QUAD_VERTICES: [QuadVertex; 4] = [
+    QuadVertex { position: [0.0, 0.0] },
+    QuadVertex { position: [1.0, 0.0] },
+    QuadVertex { position: [0.0, 1.0] },
+    QuadVertex { position: [1.0, 1.0] },
+];
+
+const QUAD_INDICES: [u16; 6] = [0, 1, 2, 2, 1, 3];
+
+// ---- Data types from JS ----
+
+#[derive(Deserialize)]
+pub struct SidebarEntry {
+    pub name: String,
+    pub depth: u32,
+    pub is_dir: bool,
+    pub expanded: bool,
+    pub is_last: Vec<bool>,
+}
+
+// ---- Layout constants ----
+
+const INDENT_WIDTH: f32 = 16.0;
+const BASE_INDENT: f32 = 12.0;
+const CHEVRON_CENTER: f32 = 7.0;
+const PADDING_Y: f32 = 3.0;
+const CHEVRON_SPACE: f32 = 14.0;
+
+// ---- SidebarRenderer ----
+
+#[wasm_bindgen]
+pub struct SidebarRenderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
     surface: wgpu::Surface<'static>,
     surface_config: wgpu::SurfaceConfiguration,
 
-    // Background
     bg_pipeline: wgpu::RenderPipeline,
     bg_vertex_buffer: wgpu::Buffer,
 
-    // Text
     text_pipeline: wgpu::RenderPipeline,
     text_bind_group: wgpu::BindGroup,
     text_uniform_buffer: wgpu::Buffer,
@@ -92,13 +109,22 @@ pub struct Renderer {
     text_instance_buffer: wgpu::Buffer,
     text_instance_count: u32,
 
-    // Font
     atlas: FontAtlas,
-    gutter_width: f32,
+
+    scroll_y: f32,
+    viewport_width: f32,
+    viewport_height: f32,
+    hover_index: i32,
+    guides_visible: bool,
 }
 
-impl Renderer {
-    pub async fn new(canvas_id: &str, font_data: &[u8], device_pixel_ratio: f32) -> Result<Self, JsValue> {
+#[wasm_bindgen]
+impl SidebarRenderer {
+    pub async fn create(
+        canvas_id: &str,
+        font_data: &[u8],
+        device_pixel_ratio: f32,
+    ) -> Result<SidebarRenderer, JsValue> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::BROWSER_WEBGPU,
             ..Default::default()
@@ -120,7 +146,7 @@ impl Renderer {
         let surface_target = wgpu::SurfaceTarget::Canvas(canvas);
         let surface = instance
             .create_surface(surface_target)
-            .map_err(|e| JsValue::from_str(&format!("Failed to create surface: {e}")))?;
+            .map_err(|e| JsValue::from_str(&format!("Surface error: {e}")))?;
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -129,12 +155,12 @@ impl Renderer {
                 force_fallback_adapter: false,
             })
             .await
-            .ok_or("No suitable GPU adapter found")?;
+            .ok_or("No GPU adapter")?;
 
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
-                    label: Some("Blink Device"),
+                    label: Some("Sidebar Device"),
                     required_features: wgpu::Features::empty(),
                     required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
                     memory_hints: wgpu::MemoryHints::Performance,
@@ -142,7 +168,7 @@ impl Renderer {
                 None,
             )
             .await
-            .map_err(|e| JsValue::from_str(&format!("Failed to get device: {e}")))?;
+            .map_err(|e| JsValue::from_str(&format!("Device error: {e}")))?;
 
         let surface_caps = surface.get_capabilities(&adapter);
         let format = surface_caps
@@ -164,14 +190,12 @@ impl Renderer {
         };
         surface.configure(&device, &surface_config);
 
-        // ---- Font atlas ----
-
-        let font_size = 14.0 * device_pixel_ratio;
+        // Font atlas
+        let font_size = 13.0 * device_pixel_ratio;
         let atlas = FontAtlas::new(font_data, font_size);
-        let gutter_width = (atlas.cell_width * 5.0 + 16.0).ceil();
 
         let atlas_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Glyph Atlas"),
+            label: Some("Sidebar Atlas"),
             size: wgpu::Extent3d {
                 width: atlas.texture_width,
                 height: atlas.texture_height,
@@ -214,23 +238,21 @@ impl Renderer {
             ..Default::default()
         });
 
-        // ---- Shader ----
-
+        // Shader
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Blink Shader"),
+            label: Some("Sidebar Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
         });
 
-        // ---- Background pipeline ----
-
+        // BG pipeline
         let bg_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("BG Pipeline Layout"),
+            label: None,
             bind_group_layouts: &[],
             push_constant_ranges: &[],
         });
 
         let bg_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("BG Pipeline"),
+            label: Some("Sidebar BG"),
             layout: Some(&bg_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -258,18 +280,17 @@ impl Renderer {
             cache: None,
         });
 
-        let bg_vertices = Self::create_background_vertices(width, height, gutter_width);
+        let bg_vertices = Self::create_bg_vertices(width, height);
         let bg_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("BG Vertex Buffer"),
+            label: Some("Sidebar BG VB"),
             contents: bytemuck::cast_slice(&bg_vertices),
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 
-        // ---- Text pipeline ----
-
+        // Text pipeline
         let text_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("Text BG Layout"),
+                label: None,
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
@@ -301,7 +322,7 @@ impl Renderer {
             });
 
         let text_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Text Uniforms"),
+            label: None,
             contents: bytemuck::cast_slice(&[TextUniforms {
                 viewport_size: [width as f32, height as f32],
                 _pad: [0.0, 0.0],
@@ -310,7 +331,7 @@ impl Renderer {
         });
 
         let text_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Text Bind Group"),
+            label: None,
             layout: &text_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
@@ -330,25 +351,23 @@ impl Renderer {
 
         let text_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Text Pipeline Layout"),
+                label: None,
                 bind_group_layouts: &[&text_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
         let text_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Text Pipeline"),
+            label: Some("Sidebar Text"),
             layout: Some(&text_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_text"),
                 buffers: &[
-                    // Slot 0: quad vertices (per-vertex)
                     wgpu::VertexBufferLayout {
                         array_stride: std::mem::size_of::<QuadVertex>() as wgpu::BufferAddress,
                         step_mode: wgpu::VertexStepMode::Vertex,
                         attributes: &wgpu::vertex_attr_array![0 => Float32x2],
                     },
-                    // Slot 1: glyph instances (per-instance)
                     wgpu::VertexBufferLayout {
                         array_stride: std::mem::size_of::<GlyphInstance>() as wgpu::BufferAddress,
                         step_mode: wgpu::VertexStepMode::Instance,
@@ -378,35 +397,25 @@ impl Renderer {
         });
 
         let text_quad_vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Quad VB"),
+            label: None,
             contents: bytemuck::cast_slice(&QUAD_VERTICES),
             usage: wgpu::BufferUsages::VERTEX,
         });
 
         let text_quad_ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Quad IB"),
+            label: None,
             contents: bytemuck::cast_slice(&QUAD_INDICES),
             usage: wgpu::BufferUsages::INDEX,
         });
 
         let text_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Glyph Instances"),
+            label: None,
             size: MAX_INSTANCES * std::mem::size_of::<GlyphInstance>() as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
-        log::info!(
-            "Blink renderer initialized ({}x{}, atlas {}x{}, cell {:.1}x{:.1})",
-            width,
-            height,
-            atlas.texture_width,
-            atlas.texture_height,
-            atlas.cell_width,
-            atlas.line_height,
-        );
-
-        Ok(Renderer {
+        Ok(SidebarRenderer {
             device,
             queue,
             surface,
@@ -421,240 +430,25 @@ impl Renderer {
             text_instance_buffer,
             text_instance_count: 0,
             atlas,
-            gutter_width,
+            scroll_y: 0.0,
+            viewport_width: width as f32,
+            viewport_height: height as f32,
+            hover_index: -1,
+            guides_visible: false,
         })
-    }
-
-    fn create_background_vertices(width: u32, height: u32, gutter_px: f32) -> Vec<Vertex> {
-        let bg_color = [0.094, 0.094, 0.094, 1.0]; // #181818
-        let gutter_color = [0.094, 0.094, 0.094, 1.0]; // #181818
-
-        // Convert gutter pixel width to clip space
-        let gutter_clip = (gutter_px / width as f32) * 2.0 - 1.0;
-
-        vec![
-            // Gutter
-            Vertex { position: [-1.0, -1.0], color: gutter_color },
-            Vertex { position: [gutter_clip, -1.0], color: gutter_color },
-            Vertex { position: [gutter_clip, 1.0], color: gutter_color },
-            Vertex { position: [-1.0, -1.0], color: gutter_color },
-            Vertex { position: [gutter_clip, 1.0], color: gutter_color },
-            Vertex { position: [-1.0, 1.0], color: gutter_color },
-            // Editor background
-            Vertex { position: [gutter_clip, -1.0], color: bg_color },
-            Vertex { position: [1.0, -1.0], color: bg_color },
-            Vertex { position: [1.0, 1.0], color: bg_color },
-            Vertex { position: [gutter_clip, -1.0], color: bg_color },
-            Vertex { position: [1.0, 1.0], color: bg_color },
-            Vertex { position: [gutter_clip, 1.0], color: bg_color },
-        ]
-    }
-
-    fn build_glyph_instances(
-        &self,
-        buffer: &TextBuffer,
-        cursor: &Cursor,
-        scroll_y: f32,
-        selection: Option<(usize, usize)>,
-        total_content_height: f32,
-        scrollbar_opacity: f32,
-    ) -> Vec<GlyphInstance> {
-        let mut instances = Vec::new();
-        let lines = buffer.lines();
-        let padding = 8.0;
-        let text_start_x = self.gutter_width + padding;
-
-        let line_num_color = [0.388, 0.388, 0.388, 1.0]; // #636363
-        let text_color = [1.0, 1.0, 1.0, 1.0]; // white
-        let cursor_color = [0.80, 0.84, 0.96, 0.9];
-        let current_line_color = [1.0, 1.0, 1.0, 0.04];
-        let selection_color = [0.34, 0.42, 0.68, 0.45];
-
-        let visible_start = (scroll_y / self.atlas.line_height) as usize;
-        let visible_count =
-            (self.surface_config.height as f32 / self.atlas.line_height) as usize + 2;
-        let solid = self.atlas.solid_uv();
-
-        // Track byte offset at start of each line for selection rendering
-        let mut line_byte_offset: usize = 0;
-
-        for (i, line) in lines
-            .iter()
-            .enumerate()
-            .skip(visible_start)
-            .take(visible_count)
-        {
-            // Compute the byte offset for this line
-            line_byte_offset = buffer.line_start_offset(i);
-            let line_end_offset = line_byte_offset + line.len();
-            let row_y = i as f32 * self.atlas.line_height - scroll_y;
-            let baseline_y = row_y + self.atlas.ascent;
-
-            // Current line highlight (only when no selection)
-            if i == cursor.line && selection.is_none() {
-                instances.push(GlyphInstance {
-                    glyph_pos: [self.gutter_width, row_y],
-                    glyph_size: [self.surface_config.width as f32 - self.gutter_width, self.atlas.line_height],
-                    uv_origin: [solid[0], solid[1]],
-                    uv_size: [solid[2], solid[3]],
-                    color: current_line_color,
-                });
-            }
-
-            // Selection highlight for this line
-            if let Some((sel_start, sel_end)) = selection {
-                if sel_start < line_end_offset + 1 && sel_end > line_byte_offset {
-                    let col_start = if sel_start > line_byte_offset {
-                        sel_start - line_byte_offset
-                    } else {
-                        0
-                    };
-                    let col_end = if sel_end < line_end_offset {
-                        sel_end - line_byte_offset
-                    } else {
-                        // Extend selection to include the newline character visually
-                        line.len() + if sel_end > line_end_offset { 1 } else { 0 }
-                    };
-
-                    if col_end > col_start {
-                        let sel_x = text_start_x + col_start as f32 * self.atlas.cell_width;
-                        let sel_w = (col_end - col_start) as f32 * self.atlas.cell_width;
-                        instances.push(GlyphInstance {
-                            glyph_pos: [sel_x, row_y],
-                            glyph_size: [sel_w, self.atlas.line_height],
-                            uv_origin: [solid[0], solid[1]],
-                            uv_size: [solid[2], solid[3]],
-                            color: selection_color,
-                        });
-                    }
-                }
-            }
-
-            // Line number
-            let line_num = format!("{:>4}", i + 1);
-            for (j, ch) in line_num.chars().enumerate() {
-                if let Some(glyph) = self.atlas.glyphs.get(&ch) {
-                    if glyph.width > 0.0 && glyph.height > 0.0 {
-                        instances.push(GlyphInstance {
-                            glyph_pos: [
-                                padding + j as f32 * self.atlas.cell_width + glyph.offset_x,
-                                baseline_y - glyph.offset_y - glyph.height,
-                            ],
-                            glyph_size: [glyph.width, glyph.height],
-                            uv_origin: [glyph.uv_x, glyph.uv_y],
-                            uv_size: [glyph.uv_w, glyph.uv_h],
-                            color: if i == cursor.line {
-                                text_color
-                            } else {
-                                line_num_color
-                            },
-                        });
-                    }
-                }
-            }
-
-            // Text content
-            for (j, ch) in line.chars().enumerate() {
-                if let Some(glyph) = self.atlas.glyphs.get(&ch) {
-                    if glyph.width > 0.0 && glyph.height > 0.0 {
-                        instances.push(GlyphInstance {
-                            glyph_pos: [
-                                text_start_x + j as f32 * self.atlas.cell_width + glyph.offset_x,
-                                baseline_y - glyph.offset_y - glyph.height,
-                            ],
-                            glyph_size: [glyph.width, glyph.height],
-                            uv_origin: [glyph.uv_x, glyph.uv_y],
-                            uv_size: [glyph.uv_w, glyph.uv_h],
-                            color: text_color,
-                        });
-                    }
-                }
-            }
-        }
-
-        // Cursor (thin vertical bar)
-        let cursor_row_y = cursor.line as f32 * self.atlas.line_height - scroll_y;
-        instances.push(GlyphInstance {
-            glyph_pos: [
-                text_start_x + cursor.col as f32 * self.atlas.cell_width,
-                cursor_row_y,
-            ],
-            glyph_size: [2.0, self.atlas.line_height],
-            uv_origin: [solid[0], solid[1]],
-            uv_size: [solid[2], solid[3]],
-            color: cursor_color,
-        });
-
-        // Scrollbar
-        let viewport_h = self.surface_config.height as f32;
-        let viewport_w = self.surface_config.width as f32;
-        if total_content_height > viewport_h && scrollbar_opacity > 0.001 {
-            let scrollbar_width = 15.0;
-            let scrollbar_x = viewport_w - scrollbar_width;
-
-            // Track background
-            let track_color = [0.863, 0.863, 0.863, 0.0714 * scrollbar_opacity];
-            instances.push(GlyphInstance {
-                glyph_pos: [scrollbar_x, 0.0],
-                glyph_size: [scrollbar_width, viewport_h],
-                uv_origin: [solid[0], solid[1]],
-                uv_size: [solid[2], solid[3]],
-                color: track_color,
-            });
-
-            // Thumb — sized proportionally to visible portion of file
-            let thumb_ratio = viewport_h / total_content_height;
-            let thumb_h = (thumb_ratio * viewport_h).max(20.0);
-            let max_scroll = total_content_height - viewport_h;
-            let scroll_ratio = if max_scroll > 0.0 { scroll_y / max_scroll } else { 0.0 };
-            let thumb_y = scroll_ratio * (viewport_h - thumb_h);
-            let thumb_color = [0.863, 0.863, 0.863, 0.18 * scrollbar_opacity];
-            instances.push(GlyphInstance {
-                glyph_pos: [scrollbar_x, thumb_y],
-                glyph_size: [scrollbar_width, thumb_h],
-                uv_origin: [solid[0], solid[1]],
-                uv_size: [solid[2], solid[3]],
-                color: thumb_color,
-            });
-
-            // Cursor position indicator — thin horizontal bar
-            let cursor_ratio = cursor.line as f32 / (buffer.line_count().max(1) as f32 - 1.0).max(1.0);
-            let indicator_y = cursor_ratio * (viewport_h - 2.0);
-            let indicator_color = [0.631, 0.631, 0.631, scrollbar_opacity];
-            instances.push(GlyphInstance {
-                glyph_pos: [scrollbar_x + 1.0, indicator_y],
-                glyph_size: [13.0, 2.0],
-                uv_origin: [solid[0], solid[1]],
-                uv_size: [solid[2], solid[3]],
-                color: indicator_color,
-            });
-        }
-
-        instances
-    }
-
-    pub fn cell_width(&self) -> f32 {
-        self.atlas.cell_width
-    }
-
-    pub fn line_height(&self) -> f32 {
-        self.atlas.line_height
-    }
-
-    pub fn gutter_width(&self) -> f32 {
-        self.gutter_width
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
         if width == 0 || height == 0 {
             return;
         }
-
+        self.viewport_width = width as f32;
+        self.viewport_height = height as f32;
         self.surface_config.width = width;
         self.surface_config.height = height;
         self.surface.configure(&self.device, &self.surface_config);
 
-        let bg_vertices = Self::create_background_vertices(width, height, self.gutter_width);
+        let bg_vertices = Self::create_bg_vertices(width, height);
         self.queue.write_buffer(
             &self.bg_vertex_buffer,
             0,
@@ -671,17 +465,41 @@ impl Renderer {
         );
     }
 
-    pub fn render(
-        &mut self,
-        buffer: &TextBuffer,
-        cursor: &Cursor,
-        scroll_y: f32,
-        selection: Option<(usize, usize)>,
-        scrollbar_opacity: f32,
-    ) {
-        let total_content_height = buffer.line_count() as f32 * self.atlas.line_height;
-        let instances =
-            self.build_glyph_instances(buffer, cursor, scroll_y, selection, total_content_height, scrollbar_opacity);
+    pub fn set_hover(&mut self, index: i32) {
+        self.hover_index = index;
+    }
+
+    pub fn set_guides_visible(&mut self, visible: bool) {
+        self.guides_visible = visible;
+    }
+
+    pub fn set_scroll(&mut self, scroll_y: f32) {
+        self.scroll_y = scroll_y;
+    }
+
+    pub fn row_height(&self) -> f32 {
+        self.atlas.line_height + PADDING_Y * 2.0
+    }
+
+    /// Hit-test: returns the entry index at the given pixel coordinate, or -1.
+    pub fn hit_test(&self, _x: f32, y: f32) -> i32 {
+        let row_h = self.row_height();
+        let index = ((y + self.scroll_y) / row_h) as i32;
+        if index < 0 { -1 } else { index }
+    }
+
+    /// Render the sidebar file tree. `entries_js` is a JS array of SidebarEntry objects.
+    pub fn render(&mut self, entries_js: JsValue) {
+        let entries: Vec<SidebarEntry> = match serde_wasm_bindgen::from_value(entries_js) {
+            Ok(e) => e,
+            Err(err) => {
+                log::error!("SidebarRenderer: failed to deserialize entries: {:?}", err);
+                return;
+            }
+        };
+        log::info!("SidebarRenderer: rendering {} entries, viewport {}x{}", entries.len(), self.viewport_width, self.viewport_height);
+
+        let instances = self.build_instances(&entries);
         let instance_count = (instances.len() as u64).min(MAX_INSTANCES) as u32;
         self.text_instance_count = instance_count;
 
@@ -695,10 +513,7 @@ impl Renderer {
 
         let output = match self.surface.get_current_texture() {
             Ok(t) => t,
-            Err(e) => {
-                log::warn!("Failed to get surface texture: {:?}", e);
-                return;
-            }
+            Err(_) => return,
         };
 
         let view = output
@@ -707,23 +522,21 @@ impl Renderer {
 
         let mut encoder = self
             .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Render Encoder"),
-            });
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Render Pass"),
+                label: None,
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.094,
-                            g: 0.094,
-                            b: 0.094,
+                            r: 0.078,
+                            g: 0.078,
+                            b: 0.078,
                             a: 1.0,
-                        }),
+                        }), // #141414
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -732,10 +545,10 @@ impl Renderer {
                 occlusion_query_set: None,
             });
 
-            // Background
+            // BG
             pass.set_pipeline(&self.bg_pipeline);
             pass.set_vertex_buffer(0, self.bg_vertex_buffer.slice(..));
-            pass.draw(0..12, 0..1);
+            pass.draw(0..6, 0..1);
 
             // Text
             if self.text_instance_count > 0 {
@@ -750,5 +563,111 @@ impl Renderer {
 
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
+    }
+
+    fn create_bg_vertices(_width: u32, _height: u32) -> Vec<Vertex> {
+        let bg = [0.078, 0.078, 0.078, 1.0]; // #141414
+        vec![
+            Vertex { position: [-1.0, -1.0], color: bg },
+            Vertex { position: [1.0, -1.0], color: bg },
+            Vertex { position: [1.0, 1.0], color: bg },
+            Vertex { position: [-1.0, -1.0], color: bg },
+            Vertex { position: [1.0, 1.0], color: bg },
+            Vertex { position: [-1.0, 1.0], color: bg },
+        ]
+    }
+
+    fn build_instances(&self, entries: &[SidebarEntry]) -> Vec<GlyphInstance> {
+        let mut instances = Vec::new();
+        let solid = self.atlas.solid_uv();
+        let row_h = self.row_height();
+        let text_color = [0.451, 0.451, 0.451, 1.0]; // #737373
+        let hover_bg = [1.0, 1.0, 1.0, 0.05];
+        let guide_color = [0.137, 0.137, 0.137, 1.0]; // #232323
+        let chevron_color = [0.533, 0.533, 0.533, 1.0]; // #888
+
+        let visible_start = (self.scroll_y / row_h) as usize;
+        let visible_count = (self.viewport_height / row_h) as usize + 2;
+
+        for (i, entry) in entries
+            .iter()
+            .enumerate()
+            .skip(visible_start)
+            .take(visible_count)
+        {
+            let row_y = i as f32 * row_h - self.scroll_y;
+            let indent = BASE_INDENT + entry.depth as f32 * INDENT_WIDTH;
+
+            // Hover highlight
+            if i as i32 == self.hover_index {
+                instances.push(GlyphInstance {
+                    glyph_pos: [0.0, row_y],
+                    glyph_size: [self.viewport_width, row_h],
+                    uv_origin: [solid[0], solid[1]],
+                    uv_size: [solid[2], solid[3]],
+                    color: hover_bg,
+                });
+            }
+
+            // Hierarchy guide lines
+            if self.guides_visible {
+                for (d, &active) in entry.is_last.iter().enumerate() {
+                    if !active {
+                        let guide_x = BASE_INDENT + d as f32 * INDENT_WIDTH + CHEVRON_CENTER;
+                        instances.push(GlyphInstance {
+                            glyph_pos: [guide_x, row_y],
+                            glyph_size: [1.0, row_h],
+                            uv_origin: [solid[0], solid[1]],
+                            uv_size: [solid[2], solid[3]],
+                            color: guide_color,
+                        });
+                    }
+                }
+            }
+
+            let baseline_y = row_y + PADDING_Y + self.atlas.ascent;
+
+            // Chevron for directories
+            if entry.is_dir {
+                let chevron_ch = if entry.expanded { 'v' } else { '>' };
+                if let Some(glyph) = self.atlas.glyphs.get(&chevron_ch) {
+                    if glyph.width > 0.0 && glyph.height > 0.0 {
+                        let chevron_x = indent + (CHEVRON_SPACE - glyph.width) / 2.0;
+                        instances.push(GlyphInstance {
+                            glyph_pos: [
+                                chevron_x + glyph.offset_x,
+                                baseline_y - glyph.offset_y - glyph.height,
+                            ],
+                            glyph_size: [glyph.width, glyph.height],
+                            uv_origin: [glyph.uv_x, glyph.uv_y],
+                            uv_size: [glyph.uv_w, glyph.uv_h],
+                            color: chevron_color,
+                        });
+                    }
+                }
+            }
+
+            // File/folder name (proportional positioning)
+            let mut cursor_x = indent + CHEVRON_SPACE;
+            for ch in entry.name.chars() {
+                if let Some(glyph) = self.atlas.glyphs.get(&ch) {
+                    if glyph.width > 0.0 && glyph.height > 0.0 {
+                        instances.push(GlyphInstance {
+                            glyph_pos: [
+                                cursor_x + glyph.offset_x,
+                                baseline_y - glyph.offset_y - glyph.height,
+                            ],
+                            glyph_size: [glyph.width, glyph.height],
+                            uv_origin: [glyph.uv_x, glyph.uv_y],
+                            uv_size: [glyph.uv_w, glyph.uv_h],
+                            color: text_color,
+                        });
+                    }
+                    cursor_x += glyph.advance_width;
+                }
+            }
+        }
+
+        instances
     }
 }

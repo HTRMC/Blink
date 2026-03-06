@@ -40,6 +40,8 @@ pub struct Editor {
     viewport_width: f32,
     scrollbar_dragging: bool,
     scrollbar_drag_offset: f32,
+    scrollbar_opacity: f32,
+    scrollbar_target_opacity: f32,
 }
 
 #[wasm_bindgen]
@@ -61,6 +63,8 @@ impl Editor {
             viewport_width: 0.0,
             scrollbar_dragging: false,
             scrollbar_drag_offset: 0.0,
+            scrollbar_opacity: 0.0,
+            scrollbar_target_opacity: 0.0,
         }
     }
 
@@ -68,8 +72,9 @@ impl Editor {
         &mut self,
         canvas_id: &str,
         font_data: &[u8],
+        device_pixel_ratio: f32,
     ) -> Result<(), JsValue> {
-        let renderer = Renderer::new(canvas_id, font_data).await?;
+        let renderer = Renderer::new(canvas_id, font_data, device_pixel_ratio).await?;
         self.renderer = Some(renderer);
         Ok(())
     }
@@ -121,7 +126,7 @@ impl Editor {
     pub fn render(&mut self) {
         if let Some(ref mut renderer) = self.renderer {
             let sel_range = self.selection.range(self.cursor.offset);
-            renderer.render(&self.buffer, &self.cursor, self.scroll_y, sel_range);
+            renderer.render(&self.buffer, &self.cursor, self.scroll_y, sel_range, self.scrollbar_opacity);
         }
     }
 
@@ -139,17 +144,34 @@ impl Editor {
         self.target_scroll_y = (self.target_scroll_y + delta_y).clamp(0.0, max_scroll);
     }
 
-    /// Tick the smooth scroll interpolation. Returns true if still animating.
+    /// Set whether the canvas is hovered (controls scrollbar fade).
+    pub fn set_canvas_hovered(&mut self, hovered: bool) {
+        self.scrollbar_target_opacity = if hovered { 1.0 } else { 0.0 };
+    }
+
+    /// Tick the smooth scroll interpolation and scrollbar fade. Returns true if still animating.
     pub fn tick(&mut self) -> bool {
+        let mut animating = false;
+
+        // Scroll interpolation
         let diff = self.target_scroll_y - self.scroll_y;
         if diff.abs() < 0.5 {
             self.scroll_y = self.target_scroll_y;
-            return false;
+        } else {
+            self.scroll_y += diff * 0.18;
+            animating = true;
         }
-        // Exponential ease-out: lerp factor ~0.15 per frame at 60fps,
-        // but we use a fixed factor that feels smooth at any refresh rate
-        self.scroll_y += diff * 0.18;
-        true
+
+        // Scrollbar opacity interpolation
+        let opacity_diff = self.scrollbar_target_opacity - self.scrollbar_opacity;
+        if opacity_diff.abs() < 0.01 {
+            self.scrollbar_opacity = self.scrollbar_target_opacity;
+        } else {
+            self.scrollbar_opacity += opacity_diff * 0.12;
+            animating = true;
+        }
+
+        animating
     }
 
     /// Whether smooth scroll animation is in progress.

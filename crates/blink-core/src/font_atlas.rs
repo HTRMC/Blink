@@ -10,6 +10,7 @@ pub struct GlyphInfo {
     pub height: f32,
     pub offset_x: f32,
     pub offset_y: f32,
+    pub advance_width: f32,
 }
 
 pub struct FontAtlas {
@@ -90,6 +91,7 @@ impl FontAtlas {
                     height: h as f32,
                     offset_x: metrics.xmin as f32,
                     offset_y: metrics.ymin as f32,
+                    advance_width: metrics.advance_width,
                 },
             );
 

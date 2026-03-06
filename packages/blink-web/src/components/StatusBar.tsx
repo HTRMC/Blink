@@ -19,7 +19,7 @@ export default function StatusBar({ activeFile }: Props) {
         justifyContent: "space-between",
       }}
     >
-      <span>{activeFile ? activeFile.name : "No file open"}</span>
+      <span>{activeFile ? activeFile.path : "No file open"}</span>
       <span>Blink v0.1.0</span>
     </div>
   );

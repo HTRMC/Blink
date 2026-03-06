@@ -5,7 +5,7 @@ import StatusBar from "./components/StatusBar";
 import { FileSystemProvider, useFileSystem } from "./hooks/useFileSystem";
 
 function AppInner() {
-  const { openFiles, activeFile, openFile, closeFile, setActiveFile } = useFileSystem();
+  const { openFiles, activeFile, closeFile, setActiveFile } = useFileSystem();
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
@@ -16,7 +16,7 @@ function AppInner() {
         onClose={closeFile}
       />
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
-        <Sidebar onFileSelect={openFile} />
+        <Sidebar />
         <EditorCanvas activeFile={activeFile} />
       </div>
       <StatusBar activeFile={activeFile} />

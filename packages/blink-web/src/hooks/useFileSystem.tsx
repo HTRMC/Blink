@@ -9,25 +9,30 @@ import { get, set } from "idb-keyval";
 
 export interface OpenFile {
   name: string;
+  path: string;
   content: string;
 }
 
-interface FileEntry {
+export interface FileEntry {
   name: string;
+  path: string;
   kind: "file" | "directory";
+  children?: FileEntry[];
+  loaded?: boolean;
+  handle?: FileSystemDirectoryHandle | FileSystemFileHandle;
 }
 
 interface FileSystemContextValue {
   directoryHandle: FileSystemDirectoryHandle | null;
-  entries: FileEntry[];
+  rootEntries: FileEntry[];
   openFiles: OpenFile[];
   activeFile: OpenFile | null;
   openDirectory: () => Promise<void>;
-  openFile: (name: string, content?: string) => void;
-  closeFile: (name: string) => void;
-  setActiveFile: (name: string) => void;
-  readFile: (name: string) => Promise<string>;
-  writeFile: (name: string, content: string) => Promise<void>;
+  loadChildren: (entry: FileEntry) => Promise<FileEntry[]>;
+  openFile: (entry: FileEntry) => Promise<void>;
+  closeFile: (path: string) => void;
+  setActiveFile: (path: string) => void;
+  readFileByHandle: (handle: FileSystemFileHandle) => Promise<string>;
 }
 
 const FileSystemContext = createContext<FileSystemContextValue>(null!);
@@ -40,96 +45,103 @@ function supportsFileSystemAccess(): boolean {
   return "showDirectoryPicker" in window;
 }
 
+async function readDirEntries(
+  dirHandle: FileSystemDirectoryHandle,
+  parentPath: string
+): Promise<FileEntry[]> {
+  const entries: FileEntry[] = [];
+  for await (const entry of (dirHandle as any).values()) {
+    entries.push({
+      name: entry.name,
+      path: parentPath ? `${parentPath}/${entry.name}` : entry.name,
+      kind: entry.kind,
+      handle: entry,
+      children: entry.kind === "directory" ? [] : undefined,
+      loaded: entry.kind !== "directory",
+    });
+  }
+  entries.sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === "directory" ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+  return entries;
+}
+
 export function FileSystemProvider({ children }: { children: ReactNode }) {
   const [directoryHandle, setDirectoryHandle] =
     useState<FileSystemDirectoryHandle | null>(null);
-  const [entries, setEntries] = useState<FileEntry[]>([]);
+  const [rootEntries, setRootEntries] = useState<FileEntry[]>([]);
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
   const [activeFile, setActiveFileState] = useState<OpenFile | null>(null);
 
   const openDirectory = useCallback(async () => {
     if (supportsFileSystemAccess()) {
       try {
-        const handle = await (window as any).showDirectoryPicker({ mode: "readwrite" });
-        setDirectoryHandle(handle);
-
-        const fileEntries: FileEntry[] = [];
-        for await (const entry of handle.values()) {
-          fileEntries.push({
-            name: entry.name,
-            kind: entry.kind,
-          });
-        }
-        fileEntries.sort((a, b) => {
-          if (a.kind !== b.kind) return a.kind === "directory" ? -1 : 1;
-          return a.name.localeCompare(b.name);
+        const handle = await (window as any).showDirectoryPicker({
+          mode: "readwrite",
         });
-        setEntries(fileEntries);
+        setDirectoryHandle(handle);
+        const entries = await readDirEntries(handle, "");
+        setRootEntries(entries);
       } catch (err) {
         console.error("Failed to open directory:", err);
       }
     } else {
-      // IndexedDB fallback - load stored file list
       const stored = await get<FileEntry[]>("blink-files");
       if (stored) {
-        setEntries(stored);
+        setRootEntries(stored);
       }
     }
   }, []);
 
-  const readFile = useCallback(
-    async (name: string): Promise<string> => {
-      if (directoryHandle) {
-        const fileHandle = await directoryHandle.getFileHandle(name);
-        const file = await fileHandle.getFile();
-        return file.text();
-      }
-      // IndexedDB fallback
-      const content = await get<string>(`blink-file-${name}`);
-      return content ?? "";
+  const loadChildren = useCallback(
+    async (entry: FileEntry): Promise<FileEntry[]> => {
+      if (entry.kind !== "directory" || !entry.handle) return [];
+      const dirHandle = entry.handle as FileSystemDirectoryHandle;
+      const children = await readDirEntries(dirHandle, entry.path);
+      return children;
     },
-    [directoryHandle]
+    []
   );
 
-  const writeFile = useCallback(
-    async (name: string, content: string) => {
-      if (directoryHandle) {
-        const fileHandle = await directoryHandle.getFileHandle(name, {
-          create: true,
-        });
-        const writable = await fileHandle.createWritable();
-        await writable.write(content);
-        await writable.close();
-      } else {
-        // IndexedDB fallback
-        await set(`blink-file-${name}`, content);
-      }
+  const readFileByHandle = useCallback(
+    async (handle: FileSystemFileHandle): Promise<string> => {
+      const file = await handle.getFile();
+      return file.text();
     },
-    [directoryHandle]
+    []
   );
 
   const openFile = useCallback(
-    async (name: string, _content?: string) => {
-      // Check if already open
-      const existing = openFiles.find((f) => f.name === name);
+    async (entry: FileEntry) => {
+      const existing = openFiles.find((f) => f.path === entry.path);
       if (existing) {
         setActiveFileState(existing);
         return;
       }
 
-      const content = await readFile(name);
-      const file: OpenFile = { name, content };
+      let content = "";
+      if (entry.handle && entry.kind === "file") {
+        content = await readFileByHandle(
+          entry.handle as FileSystemFileHandle
+        );
+      } else {
+        const stored = await get<string>(`blink-file-${entry.path}`);
+        content = stored ?? "";
+      }
+
+      const file: OpenFile = { name: entry.name, path: entry.path, content };
       setOpenFiles((prev) => [...prev, file]);
       setActiveFileState(file);
     },
-    [openFiles, readFile]
+    [openFiles, readFileByHandle]
   );
 
   const closeFile = useCallback(
-    (name: string) => {
+    (path: string) => {
       setOpenFiles((prev) => {
-        const next = prev.filter((f) => f.name !== name);
-        if (activeFile?.name === name) {
+        const next = prev.filter((f) => f.path !== path);
+        if (activeFile?.path === path) {
           setActiveFileState(next.length > 0 ? next[next.length - 1] : null);
         }
         return next;
@@ -139,8 +151,8 @@ export function FileSystemProvider({ children }: { children: ReactNode }) {
   );
 
   const setActiveFile = useCallback(
-    (name: string) => {
-      const file = openFiles.find((f) => f.name === name);
+    (path: string) => {
+      const file = openFiles.find((f) => f.path === path);
       if (file) setActiveFileState(file);
     },
     [openFiles]
@@ -150,15 +162,15 @@ export function FileSystemProvider({ children }: { children: ReactNode }) {
     <FileSystemContext.Provider
       value={{
         directoryHandle,
-        entries,
+        rootEntries,
         openFiles,
         activeFile,
         openDirectory,
+        loadChildren,
         openFile,
         closeFile,
         setActiveFile,
-        readFile,
-        writeFile,
+        readFileByHandle,
       }}
     >
       {children}

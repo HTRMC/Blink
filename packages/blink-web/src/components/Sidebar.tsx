@@ -1,13 +1,19 @@
 import { useState } from "react";
 import { useFileSystem } from "../hooks/useFileSystem";
+import SidebarCanvas from "./SidebarCanvas";
 
-interface Props {
-  onFileSelect: (name: string, content: string) => void;
+function ChevronRight({ size = 10 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 10 10" fill="none">
+      <path d="M3 1.5 L7 5 L3 8.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
 }
 
-export default function Sidebar({ onFileSelect }: Props) {
-  const { directoryHandle, openDirectory, entries } = useFileSystem();
+export default function Sidebar() {
+  const { directoryHandle, openDirectory } = useFileSystem();
   const [collapsed, setCollapsed] = useState(false);
+  const [hovered, setHovered] = useState(false);
 
   if (collapsed) {
     return (
@@ -15,7 +21,7 @@ export default function Sidebar({ onFileSelect }: Props) {
         style={{
           width: 40,
           background: "#141414",
-          borderRight: "1px solid #313244",
+          borderRight: "1px solid #232323",
           display: "flex",
           alignItems: "flex-start",
           justifyContent: "center",
@@ -33,7 +39,7 @@ export default function Sidebar({ onFileSelect }: Props) {
           }}
           title="Expand sidebar"
         >
-          {"\u25B6"}
+          <ChevronRight size={14} />
         </button>
       </div>
     );
@@ -41,10 +47,12 @@ export default function Sidebar({ onFileSelect }: Props) {
 
   return (
     <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         width: 240,
         background: "#141414",
-        borderRight: "1px solid #313244",
+        borderRight: "1px solid #232323",
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
@@ -56,7 +64,7 @@ export default function Sidebar({ onFileSelect }: Props) {
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          borderBottom: "1px solid #313244",
+          borderBottom: "1px solid #2a2a2a",
           fontSize: 11,
           textTransform: "uppercase",
           letterSpacing: 1,
@@ -72,9 +80,13 @@ export default function Sidebar({ onFileSelect }: Props) {
             color: "#a6adc8",
             cursor: "pointer",
             fontSize: 14,
+            display: "flex",
+            alignItems: "center",
           }}
         >
-          {"\u25C0"}
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+            <path d="M7 1.5 L3 5 L7 8.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
         </button>
       </div>
 
@@ -101,33 +113,8 @@ export default function Sidebar({ onFileSelect }: Props) {
           </p>
         </div>
       ) : (
-        <div style={{ flex: 1, overflow: "auto", padding: "4px 0" }}>
-          {entries.map((entry) => (
-            <div
-              key={entry.name}
-              onClick={() => {
-                if (entry.kind === "file") {
-                  onFileSelect(entry.name, "");
-                }
-              }}
-              style={{
-                padding: "4px 16px",
-                fontSize: 13,
-                cursor: entry.kind === "file" ? "pointer" : "default",
-                color: entry.kind === "file" ? "#cdd6f4" : "#89b4fa",
-                userSelect: "none",
-              }}
-              onMouseEnter={(e) =>
-                (e.currentTarget.style.background = "#313244")
-              }
-              onMouseLeave={(e) =>
-                (e.currentTarget.style.background = "transparent")
-              }
-            >
-              {entry.kind === "directory" ? "\u{1F4C1} " : "\u{1F4C4} "}
-              {entry.name}
-            </div>
-          ))}
+        <div style={{ flex: 1, overflow: "hidden" }}>
+          <SidebarCanvas showGuides={hovered} />
         </div>
       )}
     </div>
