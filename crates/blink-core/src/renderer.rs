@@ -549,6 +549,18 @@ impl Renderer {
         instances
     }
 
+    pub fn cell_width(&self) -> f32 {
+        self.atlas.cell_width
+    }
+
+    pub fn line_height(&self) -> f32 {
+        self.atlas.line_height
+    }
+
+    pub fn gutter_width(&self) -> f32 {
+        self.gutter_width
+    }
+
     pub fn resize(&mut self, width: u32, height: u32) {
         if width == 0 || height == 0 {
             return;

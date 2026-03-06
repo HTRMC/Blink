@@ -106,8 +106,21 @@ export default function EditorCanvas({ activeFile }: Props) {
       }
     };
 
+    const onClick = (e: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left) * devicePixelRatio;
+      const y = (e.clientY - rect.top) * devicePixelRatio;
+      editor.click(x, y);
+      editor.render();
+      canvas.focus();
+    };
+
     canvas.addEventListener("keydown", onKeyDown);
-    return () => canvas.removeEventListener("keydown", onKeyDown);
+    canvas.addEventListener("mousedown", onClick);
+    return () => {
+      canvas.removeEventListener("keydown", onKeyDown);
+      canvas.removeEventListener("mousedown", onClick);
+    };
   }, [status]);
 
   useEffect(() => {

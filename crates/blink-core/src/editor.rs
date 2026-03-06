@@ -112,6 +112,31 @@ impl Editor {
         }
     }
 
+    /// Set cursor position from a mouse click at pixel coordinates.
+    pub fn click(&mut self, pixel_x: f32, pixel_y: f32) {
+        let (cell_width, line_height, gutter_width) = match &self.renderer {
+            Some(r) => (r.cell_width(), r.line_height(), r.gutter_width()),
+            None => return,
+        };
+
+        let padding = 8.0;
+        let text_start_x = gutter_width + padding;
+
+        let line = ((pixel_y + self.scroll_y) / line_height).floor() as usize;
+        let max_line = self.buffer.line_count().saturating_sub(1);
+        let line = line.min(max_line);
+
+        let col = if pixel_x > text_start_x {
+            ((pixel_x - text_start_x) / cell_width).round() as usize
+        } else {
+            0
+        };
+        let col = col.min(self.buffer.line_len(line));
+
+        self.cursor.offset = self.buffer.line_start_offset(line) + col;
+        self.recalculate_cursor_position();
+    }
+
     /// Handle a key event from JavaScript. Returns true if the editor state changed.
     pub fn handle_key(&mut self, key: &str, ctrl: bool, shift: bool) -> bool {
         match key {
