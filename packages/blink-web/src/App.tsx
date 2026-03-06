@@ -79,17 +79,19 @@ function AppInner() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
       <TitleBar />
-      <TabBar
-        tabs={openFiles}
-        activeFile={activeFile}
-        onSelect={setActiveFile}
-        onClose={closeFile}
-        onPin={pinFile}
-      />
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         <Sidebar width={sidebarWidth} />
         <ResizeHandle onDrag={handleDrag} />
-        <EditorCanvas activeFile={activeFile} />
+        <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
+          <TabBar
+            tabs={openFiles}
+            activeFile={activeFile}
+            onSelect={setActiveFile}
+            onClose={closeFile}
+            onPin={pinFile}
+          />
+          <EditorCanvas activeFile={activeFile} />
+        </div>
       </div>
       <StatusBar activeFile={activeFile} />
     </div>
