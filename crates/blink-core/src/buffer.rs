@@ -59,9 +59,6 @@ impl TextBuffer {
         self.pieces.iter().map(|p| p.length).sum()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
 
     /// Insert text at the given byte offset.
     pub fn insert(&mut self, offset: usize, text: &str) {

@@ -259,7 +259,7 @@ impl Renderer {
             cache: None,
         });
 
-        let bg_vertices = Self::create_background_vertices(width, height, gutter_width);
+        let bg_vertices = Self::create_background_vertices(width,gutter_width);
         let bg_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("BG Vertex Buffer"),
             contents: bytemuck::cast_slice(&bg_vertices),
@@ -426,7 +426,7 @@ impl Renderer {
         })
     }
 
-    fn create_background_vertices(width: u32, height: u32, gutter_px: f32) -> Vec<Vertex> {
+    fn create_background_vertices(width: u32, gutter_px: f32) -> Vec<Vertex> {
         let bg_color = [0.094, 0.094, 0.094, 1.0]; // #181818
         let gutter_color = [0.094, 0.094, 0.094, 1.0]; // #181818
 
@@ -482,17 +482,13 @@ impl Renderer {
             highlighter.highlight_line(line);
         }
 
-        // Track byte offset at start of each line for selection rendering
-        let mut line_byte_offset: usize = 0;
-
         for (i, line) in lines
             .iter()
             .enumerate()
             .skip(visible_start)
             .take(visible_count)
         {
-            // Compute the byte offset for this line
-            line_byte_offset = buffer.line_start_offset(i);
+            let line_byte_offset = buffer.line_start_offset(i);
             let line_end_offset = line_byte_offset + line.len();
             let row_y = i as f32 * self.atlas.line_height - scroll_y;
             let baseline_y = row_y + self.atlas.ascent;
@@ -694,7 +690,7 @@ impl Renderer {
         self.surface_config.height = height;
         self.surface.configure(&self.device, &self.surface_config);
 
-        let bg_vertices = Self::create_background_vertices(width, height, self.gutter_width);
+        let bg_vertices = Self::create_background_vertices(width,self.gutter_width);
         self.queue.write_buffer(
             &self.bg_vertex_buffer,
             0,
