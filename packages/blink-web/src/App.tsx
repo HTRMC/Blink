@@ -3,6 +3,8 @@ import EditorCanvas from "./components/EditorCanvas";
 import Sidebar from "./components/Sidebar";
 import TabBar from "./components/TabBar";
 import StatusBar from "./components/StatusBar";
+import TitleBar from "./components/TitleBar";
+import WelcomePage from "./components/WelcomePage";
 import { FileSystemProvider, useFileSystem } from "./hooks/useFileSystem";
 
 function ResizeHandle({
@@ -56,15 +58,27 @@ function ResizeHandle({
 }
 
 function AppInner() {
-  const { openFiles, activeFile, closeFile, setActiveFile } = useFileSystem();
+  const { directoryHandle, openFiles, activeFile, closeFile, setActiveFile } =
+    useFileSystem();
   const [sidebarWidth, setSidebarWidth] = useState(240);
 
   const handleDrag = useCallback((dx: number) => {
     setSidebarWidth((w) => Math.max(213, w + dx));
   }, []);
 
+  if (!directoryHandle) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
+        <TitleBar />
+        <WelcomePage />
+        <StatusBar activeFile={null} />
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
+      <TitleBar />
       <TabBar
         tabs={openFiles}
         activeFile={activeFile}

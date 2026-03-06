@@ -27,7 +27,7 @@ interface FileSystemContextValue {
   rootEntries: FileEntry[];
   openFiles: OpenFile[];
   activeFile: OpenFile | null;
-  openDirectory: () => Promise<void>;
+  openDirectory: (handle?: FileSystemDirectoryHandle) => Promise<void>;
   loadChildren: (entry: FileEntry) => Promise<FileEntry[]>;
   openFile: (entry: FileEntry) => Promise<void>;
   closeFile: (path: string) => void;
@@ -74,15 +74,21 @@ export function FileSystemProvider({ children }: { children: ReactNode }) {
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
   const [activeFile, setActiveFileState] = useState<OpenFile | null>(null);
 
-  const openDirectory = useCallback(async () => {
+  const openDirectory = useCallback(async (existingHandle?: FileSystemDirectoryHandle) => {
     if (supportsFileSystemAccess()) {
       try {
-        const handle = await (window as any).showDirectoryPicker({
+        const handle = existingHandle ?? await (window as any).showDirectoryPicker({
           mode: "readwrite",
         });
         setDirectoryHandle(handle);
         const entries = await readDirEntries(handle, "");
         setRootEntries(entries);
+
+        // Save to recent projects
+        const recent = (await get<Array<{ name: string; path: string; handle: FileSystemDirectoryHandle }>>("blink-recent-projects")) ?? [];
+        const filtered = recent.filter((p) => p.name !== handle.name);
+        const updated = [{ name: handle.name, handle }, ...filtered].slice(0, 10);
+        await set("blink-recent-projects", updated);
       } catch (err) {
         console.error("Failed to open directory:", err);
       }
