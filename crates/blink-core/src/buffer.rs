@@ -175,6 +175,30 @@ impl TextBuffer {
         self.content().lines().map(|l| l.to_string()).collect()
     }
 
+    /// Get the byte offset where a given line starts.
+    pub fn line_start_offset(&self, line: usize) -> usize {
+        if line == 0 {
+            return 0;
+        }
+        let content = self.content();
+        let mut count = 0;
+        for (i, ch) in content.char_indices() {
+            if ch == '\n' {
+                count += 1;
+                if count == line {
+                    return i + 1;
+                }
+            }
+        }
+        content.len()
+    }
+
+    /// Get the length of a specific line (excluding newline).
+    pub fn line_len(&self, line: usize) -> usize {
+        let lines = self.lines();
+        lines.get(line).map(|l| l.len()).unwrap_or(0)
+    }
+
     /// Count the number of lines.
     pub fn line_count(&self) -> usize {
         let content = self.content();

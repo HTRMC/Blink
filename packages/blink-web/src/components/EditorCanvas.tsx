@@ -83,6 +83,33 @@ export default function EditorCanvas({ activeFile }: Props) {
     }
   }, [activeFile]);
 
+  // Keyboard input
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const editor = editorRef.current;
+    if (!canvas || !editor) return;
+
+    // Make canvas focusable
+    canvas.tabIndex = 0;
+    canvas.style.outline = "none";
+    canvas.focus();
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Let browser handle Ctrl+C/V/X/A/Z, F5, F12, etc.
+      if (e.ctrlKey && ["c", "v", "x", "a", "z", "y"].includes(e.key.toLowerCase())) return;
+      if (e.key.startsWith("F") && e.key.length > 1) return;
+
+      e.preventDefault();
+      const changed = editor.handle_key(e.key, e.ctrlKey, e.shiftKey);
+      if (changed) {
+        editor.render();
+      }
+    };
+
+    canvas.addEventListener("keydown", onKeyDown);
+    return () => canvas.removeEventListener("keydown", onKeyDown);
+  }, [status]);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     const editor = editorRef.current;

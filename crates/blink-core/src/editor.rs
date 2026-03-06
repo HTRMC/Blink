@@ -112,6 +112,173 @@ impl Editor {
         }
     }
 
+    /// Handle a key event from JavaScript. Returns true if the editor state changed.
+    pub fn handle_key(&mut self, key: &str, ctrl: bool, shift: bool) -> bool {
+        match key {
+            "ArrowLeft" => {
+                if ctrl {
+                    self.move_word_left();
+                } else {
+                    self.move_left();
+                }
+                true
+            }
+            "ArrowRight" => {
+                if ctrl {
+                    self.move_word_right();
+                } else {
+                    self.move_right();
+                }
+                true
+            }
+            "ArrowUp" => {
+                self.move_up();
+                true
+            }
+            "ArrowDown" => {
+                self.move_down();
+                true
+            }
+            "Home" => {
+                self.move_to_line_start();
+                true
+            }
+            "End" => {
+                self.move_to_line_end();
+                true
+            }
+            "Backspace" => {
+                self.delete_backward(1);
+                true
+            }
+            "Delete" => {
+                self.delete_forward(1);
+                true
+            }
+            "Enter" => {
+                self.insert_text("\n");
+                true
+            }
+            "Tab" => {
+                self.insert_text("    ");
+                true
+            }
+            _ => {
+                if !ctrl && key.len() == 1 {
+                    self.insert_text(key);
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+    }
+
+    /// Delete `count` characters after the cursor.
+    pub fn delete_forward(&mut self, count: usize) {
+        let len = self.buffer.len();
+        let actual = count.min(len - self.cursor.offset);
+        if actual == 0 {
+            return;
+        }
+        self.buffer.delete(self.cursor.offset, actual);
+        self.recalculate_cursor_position();
+    }
+
+    fn move_left(&mut self) {
+        if self.cursor.offset > 0 {
+            self.cursor.offset -= 1;
+            // Skip back over multi-byte UTF-8
+            let content = self.buffer.content();
+            while self.cursor.offset > 0
+                && !content.is_char_boundary(self.cursor.offset)
+            {
+                self.cursor.offset -= 1;
+            }
+            self.recalculate_cursor_position();
+        }
+    }
+
+    fn move_right(&mut self) {
+        let len = self.buffer.len();
+        if self.cursor.offset < len {
+            let content = self.buffer.content();
+            let ch_len = content[self.cursor.offset..]
+                .chars()
+                .next()
+                .map(|c| c.len_utf8())
+                .unwrap_or(1);
+            self.cursor.offset += ch_len;
+            self.recalculate_cursor_position();
+        }
+    }
+
+    fn move_up(&mut self) {
+        if self.cursor.line > 0 {
+            let target_line = self.cursor.line - 1;
+            let target_col = self.cursor.col.min(self.buffer.line_len(target_line));
+            self.cursor.offset = self.buffer.line_start_offset(target_line) + target_col;
+            self.recalculate_cursor_position();
+        }
+    }
+
+    fn move_down(&mut self) {
+        let max_line = self.buffer.line_count().saturating_sub(1);
+        if self.cursor.line < max_line {
+            let target_line = self.cursor.line + 1;
+            let target_col = self.cursor.col.min(self.buffer.line_len(target_line));
+            self.cursor.offset = self.buffer.line_start_offset(target_line) + target_col;
+            self.recalculate_cursor_position();
+        }
+    }
+
+    fn move_to_line_start(&mut self) {
+        self.cursor.offset = self.buffer.line_start_offset(self.cursor.line);
+        self.recalculate_cursor_position();
+    }
+
+    fn move_to_line_end(&mut self) {
+        self.cursor.offset =
+            self.buffer.line_start_offset(self.cursor.line) + self.buffer.line_len(self.cursor.line);
+        self.recalculate_cursor_position();
+    }
+
+    fn move_word_left(&mut self) {
+        if self.cursor.offset == 0 {
+            return;
+        }
+        let content = self.buffer.content();
+        let bytes = content.as_bytes();
+        let mut pos = self.cursor.offset;
+        // Skip whitespace
+        while pos > 0 && bytes[pos - 1].is_ascii_whitespace() {
+            pos -= 1;
+        }
+        // Skip word characters
+        while pos > 0 && !bytes[pos - 1].is_ascii_whitespace() {
+            pos -= 1;
+        }
+        self.cursor.offset = pos;
+        self.recalculate_cursor_position();
+    }
+
+    fn move_word_right(&mut self) {
+        let content = self.buffer.content();
+        let len = content.len();
+        let bytes = content.as_bytes();
+        let mut pos = self.cursor.offset;
+        // Skip word characters
+        while pos < len && !bytes[pos].is_ascii_whitespace() {
+            pos += 1;
+        }
+        // Skip whitespace
+        while pos < len && bytes[pos].is_ascii_whitespace() {
+            pos += 1;
+        }
+        self.cursor.offset = pos;
+        self.recalculate_cursor_position();
+    }
+
     fn recalculate_cursor_position(&mut self) {
         let content = self.buffer.content();
         let before_cursor = &content[..self.cursor.offset.min(content.len())];
