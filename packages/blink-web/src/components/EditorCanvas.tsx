@@ -97,10 +97,38 @@ export default function EditorCanvas({ activeFile }: Props) {
     canvas.style.outline = "none";
     canvas.focus();
 
-    const onKeyDown = (e: KeyboardEvent) => {
-      // Let browser handle Ctrl+C/V/X/A/Z, F5, F12, etc.
-      if (e.ctrlKey && ["c", "v", "x", "z", "y"].includes(e.key.toLowerCase())) return;
+    const onKeyDown = async (e: KeyboardEvent) => {
       if (e.key.startsWith("F") && e.key.length > 1) return;
+
+      if (e.ctrlKey) {
+        const k = e.key.toLowerCase();
+        if (k === "c") {
+          e.preventDefault();
+          const text = editor.get_selection_text();
+          if (text) await navigator.clipboard.writeText(text);
+          return;
+        }
+        if (k === "x") {
+          e.preventDefault();
+          const text = editor.get_selection_text();
+          if (text) {
+            await navigator.clipboard.writeText(text);
+            editor.handle_key("Delete", false, false);
+            editor.render();
+          }
+          return;
+        }
+        if (k === "v") {
+          e.preventDefault();
+          const text = await navigator.clipboard.readText();
+          if (text) {
+            editor.insert_text(text);
+            editor.render();
+          }
+          return;
+        }
+        if (["z", "y"].includes(k)) return;
+      }
 
       e.preventDefault();
       const changed = editor.handle_key(e.key, e.ctrlKey, e.shiftKey);
