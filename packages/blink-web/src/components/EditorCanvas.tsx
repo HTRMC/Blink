@@ -1,11 +1,13 @@
 import { useRef, useEffect, useState } from "react";
 import type { OpenFile } from "../hooks/useFileSystem";
+import { useFileSystem } from "../hooks/useFileSystem";
 
 interface Props {
   activeFile: OpenFile | null;
 }
 
 export default function EditorCanvas({ activeFile }: Props) {
+  const { pinFile } = useFileSystem();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const editorRef = useRef<any>(null);
   const [status, setStatus] = useState<string>("Initializing...");
@@ -97,6 +99,10 @@ export default function EditorCanvas({ activeFile }: Props) {
     canvas.style.outline = "none";
     canvas.focus();
 
+    const pinActive = () => {
+      if (activeFile?.preview) pinFile(activeFile.path);
+    };
+
     const onKeyDown = async (e: KeyboardEvent) => {
       if (e.key.startsWith("F") && e.key.length > 1) return;
 
@@ -115,6 +121,7 @@ export default function EditorCanvas({ activeFile }: Props) {
             await navigator.clipboard.writeText(text);
             editor.handle_key("Delete", false, false);
             editor.render();
+            pinActive();
           }
           return;
         }
@@ -124,6 +131,7 @@ export default function EditorCanvas({ activeFile }: Props) {
           if (text) {
             editor.insert_text(text);
             editor.render();
+            pinActive();
           }
           return;
         }
@@ -134,6 +142,11 @@ export default function EditorCanvas({ activeFile }: Props) {
       const changed = editor.handle_key(e.key, e.ctrlKey, e.shiftKey);
       if (changed) {
         editor.render();
+        // Pin on actual edits (typing, backspace, delete, enter, tab)
+        const editKeys = ["Backspace", "Delete", "Enter", "Tab"];
+        if (e.key.length === 1 || editKeys.includes(e.key)) {
+          pinActive();
+        }
       }
     };
 

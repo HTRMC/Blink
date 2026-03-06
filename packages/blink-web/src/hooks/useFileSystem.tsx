@@ -11,6 +11,7 @@ export interface OpenFile {
   name: string;
   path: string;
   content: string;
+  preview?: boolean;
 }
 
 export interface FileEntry {
@@ -30,6 +31,7 @@ interface FileSystemContextValue {
   openDirectory: (handle?: FileSystemDirectoryHandle) => Promise<void>;
   loadChildren: (entry: FileEntry) => Promise<FileEntry[]>;
   openFile: (entry: FileEntry) => Promise<void>;
+  pinFile: (path: string) => void;
   closeFile: (path: string) => void;
   setActiveFile: (path: string) => void;
   readFileByHandle: (handle: FileSystemFileHandle) => Promise<string>;
@@ -120,8 +122,9 @@ export function FileSystemProvider({ children }: { children: ReactNode }) {
 
   const openFile = useCallback(
     async (entry: FileEntry) => {
+      // If already open and pinned, just activate it
       const existing = openFiles.find((f) => f.path === entry.path);
-      if (existing) {
+      if (existing && !existing.preview) {
         setActiveFileState(existing);
         return;
       }
@@ -136,11 +139,32 @@ export function FileSystemProvider({ children }: { children: ReactNode }) {
         content = stored ?? "";
       }
 
-      const file: OpenFile = { name: entry.name, path: entry.path, content };
-      setOpenFiles((prev) => [...prev, file]);
+      const file: OpenFile = { name: entry.name, path: entry.path, content, preview: true };
+
+      setOpenFiles((prev) => {
+        // If this file already exists as preview, just update it
+        if (existing && existing.preview) {
+          return prev.map((f) => (f.path === entry.path ? file : f));
+        }
+        // Replace any existing preview tab with this new one
+        const withoutPreview = prev.filter((f) => !f.preview);
+        return [...withoutPreview, file];
+      });
       setActiveFileState(file);
     },
     [openFiles, readFileByHandle]
+  );
+
+  const pinFile = useCallback(
+    (path: string) => {
+      setOpenFiles((prev) =>
+        prev.map((f) => (f.path === path ? { ...f, preview: false } : f))
+      );
+      setActiveFileState((cur: OpenFile | null) =>
+        cur && cur.path === path ? { ...cur, preview: false } : cur
+      );
+    },
+    []
   );
 
   const closeFile = useCallback(
@@ -174,6 +198,7 @@ export function FileSystemProvider({ children }: { children: ReactNode }) {
         openDirectory,
         loadChildren,
         openFile,
+        pinFile,
         closeFile,
         setActiveFile,
         readFileByHandle,

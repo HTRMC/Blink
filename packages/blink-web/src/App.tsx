@@ -58,7 +58,7 @@ function ResizeHandle({
 }
 
 function AppInner() {
-  const { directoryHandle, openFiles, activeFile, closeFile, setActiveFile } =
+  const { directoryHandle, openFiles, activeFile, closeFile, setActiveFile, pinFile } =
     useFileSystem();
   const [sidebarWidth, setSidebarWidth] = useState(240);
 
@@ -84,6 +84,7 @@ function AppInner() {
         activeFile={activeFile}
         onSelect={setActiveFile}
         onClose={closeFile}
+        onPin={pinFile}
       />
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         <Sidebar width={sidebarWidth} />

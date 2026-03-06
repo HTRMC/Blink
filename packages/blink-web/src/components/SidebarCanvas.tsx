@@ -55,7 +55,7 @@ export default function SidebarCanvas({ showGuides }: Props) {
   const rootEntriesRef = useRef<FileEntry[]>([]);
   const showGuidesRef = useRef(showGuides);
   const [ready, setReady] = useState(false);
-  const { rootEntries, openFile, loadChildren } = useFileSystem();
+  const { rootEntries, openFile, pinFile, loadChildren } = useFileSystem();
 
   // Keep refs in sync
   rootEntriesRef.current = rootEntries;
@@ -191,7 +191,9 @@ export default function SidebarCanvas({ showGuides }: Props) {
       renderTree();
     };
 
-    const onClick = async (e: MouseEvent) => {
+    let clickTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const onClick = (e: MouseEvent) => {
       const renderer = rendererRef.current;
       if (!renderer) return;
       const rect = canvas.getBoundingClientRect();
@@ -206,26 +208,58 @@ export default function SidebarCanvas({ showGuides }: Props) {
           expandedRef.current.delete(path);
         } else {
           if (!childrenMapRef.current.has(path)) {
-            const kids = await loadChildren(flat.entry);
-            childrenMapRef.current.set(path, kids);
+            loadChildren(flat.entry).then((kids) => {
+              childrenMapRef.current.set(path, kids);
+              expandedRef.current.add(path);
+              renderTree();
+            });
+            return;
           }
           expandedRef.current.add(path);
         }
         renderTree();
       } else {
-        openFile(flat.entry);
+        // Delay single-click to distinguish from double-click
+        if (clickTimer) clearTimeout(clickTimer);
+        clickTimer = setTimeout(() => {
+          clickTimer = null;
+          openFile(flat.entry);
+        }, 200);
+      }
+    };
+
+    const onDblClick = (e: MouseEvent) => {
+      // Cancel the pending single-click preview open
+      if (clickTimer) {
+        clearTimeout(clickTimer);
+        clickTimer = null;
+      }
+
+      const renderer = rendererRef.current;
+      if (!renderer) return;
+      const rect = canvas.getBoundingClientRect();
+      const y = (e.clientY - rect.top) * devicePixelRatio;
+      const index = renderer.hit_test(0, y);
+      if (index < 0 || index >= flatRef.current.length) return;
+
+      const flat = flatRef.current[index];
+      if (!flat.is_dir) {
+        openFile(flat.entry).then(() => pinFile(flat.entry.path));
       }
     };
 
     canvas.addEventListener("mousemove", onMouseMove);
     canvas.addEventListener("mouseleave", onMouseLeave);
     canvas.addEventListener("click", onClick);
+    canvas.addEventListener("dblclick", onDblClick);
     return () => {
       canvas.removeEventListener("mousemove", onMouseMove);
       canvas.removeEventListener("mouseleave", onMouseLeave);
       canvas.removeEventListener("click", onClick);
+      canvas.removeEventListener("dblclick", onDblClick);
+      if (clickTimer) clearTimeout(clickTimer);
     };
-  }, [ready, openFile, loadChildren]);
+  }, [ready, openFile, pinFile, loadChildren]);
 
   return (
     <canvas
