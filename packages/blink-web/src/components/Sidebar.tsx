@@ -14,7 +14,7 @@ export default function Sidebar({ onFileSelect }: Props) {
       <div
         style={{
           width: 40,
-          background: "#181825",
+          background: "#141414",
           borderRight: "1px solid #313244",
           display: "flex",
           alignItems: "flex-start",
@@ -43,7 +43,7 @@ export default function Sidebar({ onFileSelect }: Props) {
     <div
       style={{
         width: 240,
-        background: "#181825",
+        background: "#141414",
         borderRight: "1px solid #313244",
         display: "flex",
         flexDirection: "column",

@@ -14,7 +14,7 @@ export default function TabBar({ tabs, activeFile, onSelect, onClose }: Props) {
     <div
       style={{
         display: "flex",
-        background: "#181825",
+        background: "#141414",
         borderBottom: "1px solid #313244",
         height: 36,
         overflow: "auto",
@@ -32,7 +32,7 @@ export default function TabBar({ tabs, activeFile, onSelect, onClose }: Props) {
             fontSize: 13,
             cursor: "pointer",
             background:
-              activeFile?.name === tab.name ? "#1e1e2e" : "transparent",
+              activeFile?.name === tab.name ? "#181818" : "transparent",
             borderRight: "1px solid #313244",
             color:
               activeFile?.name === tab.name ? "#cdd6f4" : "#6c7086",

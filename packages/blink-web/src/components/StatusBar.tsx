@@ -9,7 +9,7 @@ export default function StatusBar({ activeFile }: Props) {
     <div
       style={{
         height: 24,
-        background: "#181825",
+        background: "#141414",
         borderTop: "1px solid #313244",
         display: "flex",
         alignItems: "center",

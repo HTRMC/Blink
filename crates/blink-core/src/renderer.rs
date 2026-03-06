@@ -426,8 +426,8 @@ impl Renderer {
     }
 
     fn create_background_vertices(width: u32, height: u32, gutter_px: f32) -> Vec<Vertex> {
-        let bg_color = [0.118, 0.118, 0.180, 1.0];
-        let gutter_color = [0.145, 0.145, 0.210, 1.0];
+        let bg_color = [0.094, 0.094, 0.094, 1.0]; // #181818
+        let gutter_color = [0.094, 0.094, 0.094, 1.0]; // #181818
 
         // Convert gutter pixel width to clip space
         let gutter_clip = (gutter_px / width as f32) * 2.0 - 1.0;
@@ -588,11 +588,11 @@ impl Renderer {
         let viewport_h = self.surface_config.height as f32;
         let viewport_w = self.surface_config.width as f32;
         if total_content_height > viewport_h {
-            let scrollbar_width = 8.0;
+            let scrollbar_width = 15.0;
             let scrollbar_x = viewport_w - scrollbar_width;
 
             // Track background
-            let track_color = [1.0, 1.0, 1.0, 0.03];
+            let track_color = [0.863, 0.863, 0.863, 0.0714]; // rgba(220,220,220,0.0714)
             instances.push(GlyphInstance {
                 glyph_pos: [scrollbar_x, 0.0],
                 glyph_size: [scrollbar_width, viewport_h],
@@ -601,18 +601,31 @@ impl Renderer {
                 color: track_color,
             });
 
-            // Thumb
+            // Thumb — sized proportionally to visible portion of file
             let thumb_ratio = viewport_h / total_content_height;
             let thumb_h = (thumb_ratio * viewport_h).max(20.0);
-            let scroll_ratio = scroll_y / (total_content_height - viewport_h);
+            let max_scroll = total_content_height - viewport_h;
+            let scroll_ratio = if max_scroll > 0.0 { scroll_y / max_scroll } else { 0.0 };
             let thumb_y = scroll_ratio * (viewport_h - thumb_h);
-            let thumb_color = [1.0, 1.0, 1.0, 0.15];
+            let thumb_color = [0.863, 0.863, 0.863, 0.18];
             instances.push(GlyphInstance {
                 glyph_pos: [scrollbar_x, thumb_y],
                 glyph_size: [scrollbar_width, thumb_h],
                 uv_origin: [solid[0], solid[1]],
                 uv_size: [solid[2], solid[3]],
                 color: thumb_color,
+            });
+
+            // Cursor position indicator — thin horizontal bar
+            let cursor_ratio = cursor.line as f32 / (buffer.line_count().max(1) as f32 - 1.0).max(1.0);
+            let indicator_y = cursor_ratio * (viewport_h - 2.0);
+            let indicator_color = [0.631, 0.631, 0.631, 1.0]; // #A1A1A1
+            instances.push(GlyphInstance {
+                glyph_pos: [scrollbar_x + 1.0, indicator_y],
+                glyph_size: [13.0, 2.0],
+                uv_origin: [solid[0], solid[1]],
+                uv_size: [solid[2], solid[3]],
+                color: indicator_color,
             });
         }
 
@@ -704,9 +717,9 @@ impl Renderer {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.118,
-                            g: 0.118,
-                            b: 0.180,
+                            r: 0.094,
+                            g: 0.094,
+                            b: 0.094,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,

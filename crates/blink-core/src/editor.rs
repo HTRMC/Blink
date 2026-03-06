@@ -195,7 +195,7 @@ impl Editor {
     /// Returns true if the click was on the scrollbar.
     pub fn click(&mut self, pixel_x: f32, pixel_y: f32, shift: bool) -> bool {
         // Check if click is on scrollbar
-        let scrollbar_width = 8.0;
+        let scrollbar_width = 15.0;
         let scrollbar_x = self.viewport_width - scrollbar_width;
         let total_content = self.total_content_height();
 
