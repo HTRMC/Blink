@@ -28,7 +28,8 @@ impl FontAtlas {
         let font = Font::from_bytes(font_data, FontSettings::default())
             .expect("Failed to parse font");
 
-        let chars: Vec<char> = (32u8..127u8).map(|b| b as char).collect();
+        let mut chars: Vec<char> = (32u8..127u8).map(|b| b as char).collect();
+        chars.push('\u{00B7}'); // middle dot for whitespace visualization
 
         let mut rasterized: Vec<(char, fontdue::Metrics, Vec<u8>)> = Vec::new();
         let mut max_height: u32 = 0;

@@ -563,10 +563,35 @@ impl Renderer {
             // Syntax-highlighted text content
             let tokens = highlighter.highlight_line(line);
             let char_colors = syntax::colors_for_line(line, &tokens);
+            let dot_color = [0.35, 0.37, 0.42, 0.8]; // subtle whitespace dot
             for (j, ch) in line.chars().enumerate() {
+                let byte_idx = line.char_indices().nth(j).map(|(idx, _)| idx).unwrap_or(0);
+
+                // Whitespace dots within selection
+                if ch == ' ' {
+                    if let Some((sel_start, sel_end)) = selection {
+                        let abs_byte = line_byte_offset + byte_idx;
+                        if abs_byte >= sel_start && abs_byte < sel_end {
+                            if let Some(dot) = self.atlas.glyphs.get(&'\u{00B7}') {
+                                if dot.width > 0.0 && dot.height > 0.0 {
+                                    instances.push(GlyphInstance {
+                                        glyph_pos: [
+                                            (text_start_x + j as f32 * self.atlas.cell_width + dot.offset_x).round(),
+                                            (baseline_y - dot.offset_y - dot.height).round(),
+                                        ],
+                                        glyph_size: [dot.width, dot.height],
+                                        uv_origin: [dot.uv_x, dot.uv_y],
+                                        uv_size: [dot.uv_w, dot.uv_h],
+                                        color: dot_color,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+
                 if let Some(glyph) = self.atlas.glyphs.get(&ch) {
                     if glyph.width > 0.0 && glyph.height > 0.0 {
-                        let byte_idx = line.char_indices().nth(j).map(|(i, _)| i).unwrap_or(0);
                         let color = if byte_idx < char_colors.len() {
                             char_colors[byte_idx]
                         } else {
