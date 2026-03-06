@@ -35,7 +35,11 @@ pub struct Editor {
     selection: Selection,
     renderer: Option<Renderer>,
     scroll_y: f32,
+    target_scroll_y: f32,
     viewport_height: f32,
+    viewport_width: f32,
+    scrollbar_dragging: bool,
+    scrollbar_drag_offset: f32,
 }
 
 #[wasm_bindgen]
@@ -52,7 +56,11 @@ impl Editor {
             selection: Selection { anchor: 0 },
             renderer: None,
             scroll_y: 0.0,
+            target_scroll_y: 0.0,
             viewport_height: 0.0,
+            viewport_width: 0.0,
+            scrollbar_dragging: false,
+            scrollbar_drag_offset: 0.0,
         }
     }
 
@@ -118,27 +126,142 @@ impl Editor {
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
+        self.viewport_width = width as f32;
         self.viewport_height = height as f32;
         if let Some(ref mut renderer) = self.renderer {
             renderer.resize(width, height);
         }
     }
 
+    /// Scroll by a pixel delta (positive = scroll down). Sets the target for smooth interpolation.
+    pub fn scroll(&mut self, delta_y: f32) {
+        let max_scroll = self.max_scroll();
+        self.target_scroll_y = (self.target_scroll_y + delta_y).clamp(0.0, max_scroll);
+    }
+
+    /// Tick the smooth scroll interpolation. Returns true if still animating.
+    pub fn tick(&mut self) -> bool {
+        let diff = self.target_scroll_y - self.scroll_y;
+        if diff.abs() < 0.5 {
+            self.scroll_y = self.target_scroll_y;
+            return false;
+        }
+        // Exponential ease-out: lerp factor ~0.15 per frame at 60fps,
+        // but we use a fixed factor that feels smooth at any refresh rate
+        self.scroll_y += diff * 0.18;
+        true
+    }
+
+    /// Whether smooth scroll animation is in progress.
+    pub fn is_scrolling(&self) -> bool {
+        (self.target_scroll_y - self.scroll_y).abs() > 0.5
+    }
+
+    /// Ensure the cursor is visible in the viewport, scrolling if needed.
+    fn ensure_cursor_visible(&mut self) {
+        let line_height = self.line_height();
+        let cursor_top = self.cursor.line as f32 * line_height;
+        let cursor_bottom = cursor_top + line_height;
+
+        if cursor_top < self.target_scroll_y {
+            self.target_scroll_y = cursor_top;
+        } else if cursor_bottom > self.target_scroll_y + self.viewport_height {
+            self.target_scroll_y = cursor_bottom - self.viewport_height;
+        }
+        // For keyboard-triggered scroll, snap immediately for responsiveness
+        self.scroll_y = self.target_scroll_y;
+    }
+
+    fn max_scroll(&self) -> f32 {
+        let line_height = self.line_height();
+        (self.buffer.line_count() as f32 * line_height - self.viewport_height).max(0.0)
+    }
+
+    fn line_height(&self) -> f32 {
+        self.renderer
+            .as_ref()
+            .map(|r| r.line_height())
+            .unwrap_or(20.0)
+    }
+
+    /// Get scroll info for the scrollbar: (scroll_y, viewport_height, total_content_height).
+    pub fn scroll_info(&self) -> Vec<f32> {
+        let line_height = self.line_height();
+        let total = self.buffer.line_count() as f32 * line_height;
+        vec![self.scroll_y, self.viewport_height, total]
+    }
+
     /// Set cursor from mouse click. If shift is held, extend selection.
-    pub fn click(&mut self, pixel_x: f32, pixel_y: f32, shift: bool) {
+    /// Returns true if the click was on the scrollbar.
+    pub fn click(&mut self, pixel_x: f32, pixel_y: f32, shift: bool) -> bool {
+        // Check if click is on scrollbar
+        let scrollbar_width = 8.0;
+        let scrollbar_x = self.viewport_width - scrollbar_width;
+        let total_content = self.total_content_height();
+
+        if pixel_x >= scrollbar_x && total_content > self.viewport_height {
+            let thumb_ratio = self.viewport_height / total_content;
+            let thumb_h = (thumb_ratio * self.viewport_height).max(20.0);
+            let max_scroll = self.max_scroll();
+            let scroll_ratio = if max_scroll > 0.0 { self.scroll_y / max_scroll } else { 0.0 };
+            let thumb_y = scroll_ratio * (self.viewport_height - thumb_h);
+
+            if pixel_y >= thumb_y && pixel_y <= thumb_y + thumb_h {
+                // Clicked on thumb — start dragging with offset from thumb top
+                self.scrollbar_dragging = true;
+                self.scrollbar_drag_offset = pixel_y - thumb_y;
+            } else {
+                // Clicked on track — jump to that position
+                let ratio = pixel_y / self.viewport_height;
+                let target = ratio * max_scroll;
+                self.scroll_y = target.clamp(0.0, max_scroll);
+                self.target_scroll_y = self.scroll_y;
+                self.scrollbar_dragging = true;
+                self.scrollbar_drag_offset = thumb_h / 2.0;
+            }
+            return true;
+        }
+
         let offset = self.pixel_to_offset(pixel_x, pixel_y);
         if !shift {
             self.selection.anchor = offset;
         }
         self.cursor.offset = offset;
         self.recalculate_cursor_position();
+        false
     }
 
-    /// Update selection during mouse drag.
+    /// Update during mouse drag — handles both text selection and scrollbar dragging.
     pub fn drag(&mut self, pixel_x: f32, pixel_y: f32) {
+        if self.scrollbar_dragging {
+            let total_content = self.total_content_height();
+            let thumb_ratio = self.viewport_height / total_content;
+            let thumb_h = (thumb_ratio * self.viewport_height).max(20.0);
+            let max_scroll = self.max_scroll();
+            let track_space = self.viewport_height - thumb_h;
+
+            if track_space > 0.0 {
+                let thumb_top = pixel_y - self.scrollbar_drag_offset;
+                let ratio = thumb_top / track_space;
+                let target = ratio * max_scroll;
+                self.scroll_y = target.clamp(0.0, max_scroll);
+                self.target_scroll_y = self.scroll_y;
+            }
+            return;
+        }
+
         let offset = self.pixel_to_offset(pixel_x, pixel_y);
         self.cursor.offset = offset;
         self.recalculate_cursor_position();
+    }
+
+    /// End mouse drag.
+    pub fn mouse_up(&mut self) {
+        self.scrollbar_dragging = false;
+    }
+
+    fn total_content_height(&self) -> f32 {
+        self.buffer.line_count() as f32 * self.line_height()
     }
 
     pub fn handle_key(&mut self, key: &str, ctrl: bool, shift: bool) -> bool {
@@ -413,5 +536,6 @@ impl Editor {
             .rfind('\n')
             .map(|pos| before_cursor.len() - pos - 1)
             .unwrap_or(before_cursor.len());
+        self.ensure_cursor_visible();
     }
 }

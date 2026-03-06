@@ -112,10 +112,13 @@ export default function EditorCanvas({ activeFile }: Props) {
       const rect = canvas.getBoundingClientRect();
       const x = (e.clientX - rect.left) * devicePixelRatio;
       const y = (e.clientY - rect.top) * devicePixelRatio;
-      editor.click(x, y, e.shiftKey);
+      const onScrollbar = editor.click(x, y, e.shiftKey);
       editor.render();
       canvas.focus();
       dragging = true;
+      if (onScrollbar) {
+        e.preventDefault();
+      }
     };
 
     const onMouseMove = (e: MouseEvent) => {
@@ -129,17 +132,43 @@ export default function EditorCanvas({ activeFile }: Props) {
 
     const onMouseUp = () => {
       dragging = false;
+      editor.mouse_up();
+    };
+
+    let animFrameId = 0;
+
+    const scheduleFrame = () => {
+      if (animFrameId) return;
+      animFrameId = requestAnimationFrame(animationLoop);
+    };
+
+    const animationLoop = () => {
+      animFrameId = 0;
+      const stillScrolling = editor.tick();
+      editor.render();
+      if (stillScrolling) {
+        animFrameId = requestAnimationFrame(animationLoop);
+      }
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      editor.scroll(e.deltaY * devicePixelRatio);
+      scheduleFrame();
     };
 
     canvas.addEventListener("keydown", onKeyDown);
     canvas.addEventListener("mousedown", onMouseDown);
+    canvas.addEventListener("wheel", onWheel, { passive: false });
     window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseup", onMouseUp);
     return () => {
       canvas.removeEventListener("keydown", onKeyDown);
       canvas.removeEventListener("mousedown", onMouseDown);
+      canvas.removeEventListener("wheel", onWheel);
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
+      if (animFrameId) cancelAnimationFrame(animFrameId);
     };
   }, [status]);
 

@@ -456,6 +456,7 @@ impl Renderer {
         cursor: &Cursor,
         scroll_y: f32,
         selection: Option<(usize, usize)>,
+        total_content_height: f32,
     ) -> Vec<GlyphInstance> {
         let mut instances = Vec::new();
         let lines = buffer.lines();
@@ -583,6 +584,38 @@ impl Renderer {
             color: cursor_color,
         });
 
+        // Scrollbar
+        let viewport_h = self.surface_config.height as f32;
+        let viewport_w = self.surface_config.width as f32;
+        if total_content_height > viewport_h {
+            let scrollbar_width = 8.0;
+            let scrollbar_x = viewport_w - scrollbar_width;
+
+            // Track background
+            let track_color = [1.0, 1.0, 1.0, 0.03];
+            instances.push(GlyphInstance {
+                glyph_pos: [scrollbar_x, 0.0],
+                glyph_size: [scrollbar_width, viewport_h],
+                uv_origin: [solid[0], solid[1]],
+                uv_size: [solid[2], solid[3]],
+                color: track_color,
+            });
+
+            // Thumb
+            let thumb_ratio = viewport_h / total_content_height;
+            let thumb_h = (thumb_ratio * viewport_h).max(20.0);
+            let scroll_ratio = scroll_y / (total_content_height - viewport_h);
+            let thumb_y = scroll_ratio * (viewport_h - thumb_h);
+            let thumb_color = [1.0, 1.0, 1.0, 0.15];
+            instances.push(GlyphInstance {
+                glyph_pos: [scrollbar_x, thumb_y],
+                glyph_size: [scrollbar_width, thumb_h],
+                uv_origin: [solid[0], solid[1]],
+                uv_size: [solid[2], solid[3]],
+                color: thumb_color,
+            });
+        }
+
         instances
     }
 
@@ -631,7 +664,9 @@ impl Renderer {
         scroll_y: f32,
         selection: Option<(usize, usize)>,
     ) {
-        let instances = self.build_glyph_instances(buffer, cursor, scroll_y, selection);
+        let total_content_height = buffer.line_count() as f32 * self.atlas.line_height;
+        let instances =
+            self.build_glyph_instances(buffer, cursor, scroll_y, selection, total_content_height);
         let instance_count = (instances.len() as u64).min(MAX_INSTANCES) as u32;
         self.text_instance_count = instance_count;
 
