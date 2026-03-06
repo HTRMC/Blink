@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/blink-core"]
+resolver = "2"
