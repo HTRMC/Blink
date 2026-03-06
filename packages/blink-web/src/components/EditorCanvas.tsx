@@ -23,6 +23,7 @@ export default function EditorCanvas({ activeFile }: Props) {
 
         setStatus("Loading Blink core...");
         const blink = await import("../../wasm/blink_core");
+        await blink.default();
 
         if (cancelled) return;
 
